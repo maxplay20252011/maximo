@@ -62,12 +62,19 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;}
 .credits{margin-top:14px;font-size:.7rem;color:#7d7768;letter-spacing:1px;}
 
 /* ===== HUD ===== */
-#hud{position:fixed;inset:0;z-index:20;pointer-events:none;font-family:Georgia,serif;}
+#hud{position:fixed;inset:0;z-index:26;pointer-events:none;font-family:Georgia,serif;}
 .hud-panel{
   position:absolute;background:var(--panel);border:1px solid rgba(255,215,0,.35);
   border-radius:12px;padding:9px 14px;color:#f2ecd8;box-shadow:0 4px 14px rgba(0,0,0,.4);
 }
 #statPanel{top:14px;left:14px;min-width:230px;}
+@media (max-width:480px){
+  #statPanel{min-width:0;width:56vw;padding:7px 10px;}
+  #statPanel .stat-row{font-size:.72rem;gap:5px;margin:3px 0;}
+  #minimapWrap{padding:5px;}
+  #minimap{width:34vw;height:34vw;max-width:120px;max-height:120px;}
+  #barrioList{font-size:.62rem;min-width:0;padding:6px 9px;}
+}
 .stat-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:.82rem;}
 .stat-row .ic{width:20px;text-align:center;}
 .bar-track{flex:1;height:14px;background:rgba(255,255,255,.1);border-radius:7px;overflow:hidden;border:1px solid rgba(255,255,255,.15);}
@@ -80,10 +87,49 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;}
 #minimapWrap{top:14px;right:14px;padding:8px;}
 #minimap{display:block;border-radius:8px;background:#0e2712;border:1px solid rgba(255,215,0,.3);}
 
-#weaponPanel{bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:14px;align-items:center;}
+#weaponPanel{bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;max-width:92vw;}
 #weaponName{font-weight:700;color:var(--gold);letter-spacing:1px;font-size:.95rem;}
 #ammoText{font-weight:700;color:#eee;font-size:1rem;}
-.wkey{display:inline-block;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:1px 7px;font-size:.75rem;margin:0 2px;color:#ccc;}
+.wkey{display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.3);
+  border-radius:6px;padding:5px 10px;font-size:.75rem;margin:0 1px;color:#eee;font-family:inherit;cursor:pointer;pointer-events:auto;
+  min-width:30px;transition:.15s;}
+.wkey:hover{background:rgba(255,215,0,.25);}
+.wkey:active{transform:scale(.92);}
+.wkey.active{background:var(--gold);color:#2a1a00;border-color:#fff;}
+.wkey.locked{opacity:.4;}
+
+#pauseBtnTouch{position:absolute;top:14px;left:50%;transform:translateX(-50%);pointer-events:auto;
+  background:var(--panel);border:1px solid rgba(255,215,0,.35);border-radius:10px;color:#f2ecd8;
+  font-size:1.1rem;padding:6px 14px;cursor:pointer;}
+#pauseBtnTouch:active{transform:translateX(-50%) scale(.92);}
+
+/* ===== Touch controls (mobile) ===== */
+body.touch-mode #weaponPanel{bottom:100px;}
+#touchControls{position:fixed;inset:0;z-index:22;display:none;pointer-events:none;}
+body.touch-mode #touchControls{display:block;}
+#lookZone{position:absolute;inset:0;pointer-events:auto;touch-action:none;}
+#joystickBase{position:absolute;width:110px;height:110px;border-radius:50%;
+  background:rgba(255,255,255,.08);border:2px solid rgba(255,215,0,.4);
+  display:none;pointer-events:none;transform:translate(-50%,-50%);}
+#joystickKnob{position:absolute;width:46px;height:46px;border-radius:50%;left:50%;top:50%;
+  background:rgba(255,215,0,.55);border:2px solid rgba(255,255,255,.6);transform:translate(-50%,-50%);}
+#fireBtn{position:absolute;right:26px;bottom:96px;width:88px;height:88px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#ff6b6b,#8b1a24 75%);border:3px solid rgba(255,255,255,.5);
+  display:flex;align-items:center;justify-content:center;font-size:2rem;pointer-events:auto;touch-action:none;
+  box-shadow:0 4px 18px rgba(0,0,0,.5);user-select:none;}
+#fireBtn:active{transform:scale(.93);}
+#jumpBtn{position:absolute;right:20px;bottom:200px;width:58px;height:58px;border-radius:50%;
+  background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.4);color:#fff;font-size:1.4rem;
+  display:flex;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;user-select:none;}
+#jumpBtn:active{transform:scale(.9);background:rgba(255,255,255,.28);}
+
+#portraitHint{position:fixed;top:0;left:0;right:0;z-index:60;display:none;align-items:center;justify-content:center;gap:10px;
+  background:rgba(20,10,0,.92);color:#f2ecd8;text-align:center;padding:9px 16px;font-size:.8rem;cursor:pointer;
+  border-bottom:1px solid rgba(255,215,0,.4);}
+body.touch-mode.portrait #portraitHint{display:flex;}
+#portraitHint.dismissed{display:none !important;}
+#portraitHint .rot{font-size:1.2rem;}
+#portraitHint .x{margin-left:6px;opacity:.6;font-size:.9rem;}
 
 #crosshair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:22px;height:22px;pointer-events:none;}
 #crosshair:before,#crosshair:after{content:'';position:absolute;background:rgba(255,255,255,.85);}
@@ -161,14 +207,34 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;}
   <div id="barrioList" class="hud-panel"></div>
 
   <div id="weaponPanel" class="hud-panel">
-    <span id="weaponName">Puños</span>
+    <span id="weaponName">Pistola</span>
     <span id="ammoText"></span>
-    <span><span class="wkey">1</span><span class="wkey">2</span><span class="wkey">3</span> cambiar &nbsp; <span class="wkey">B</span> tienda</span>
+    <button class="wkey" data-w="pistola" title="Pistola">1</button>
+    <button class="wkey" data-w="bate" title="Bate">2</button>
+    <button class="wkey" data-w="escopeta" title="Escopeta">3</button>
+    <button class="wkey" id="reloadBtn" title="Recargar">R</button>
+    <button class="wkey" id="shopBtnTouch" title="Tienda">B · Tienda</button>
   </div>
+
+  <button id="pauseBtnTouch" title="Pausa">⏸</button>
 
   <div id="crosshair"><div id="crosshairDot"></div></div>
   <div id="banner"></div>
   <div id="hint"></div>
+</div>
+
+<!-- Touch controls (shown only on touch devices) -->
+<div id="touchControls">
+  <div id="lookZone"></div>
+  <div id="joystickBase"><div id="joystickKnob"></div></div>
+  <div id="jumpBtn">⤴</div>
+  <div id="fireBtn">🔫</div>
+</div>
+
+<div id="portraitHint">
+  <span class="rot">📱</span>
+  <span>Se juega mejor con el celular horizontal (podés seguir así igual)</span>
+  <span class="x">✕</span>
 </div>
 
 <div id="dmgPopupsLayer"></div>
@@ -181,7 +247,7 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;}
     <div class="tagline">Un pibe cualquiera se convirtió en el capo que todos temen.<br>
     Conquistá los barrios, fundí a las otras bandas y hacete dueño de la ciudad entera: guita, fierros y poder.</div>
     <button id="playBtn" class="big-btn">Jugar</button>
-    <div class="controls-card">
+    <div class="controls-card" id="controlsCardStart">
       <div><b>WASD</b> moverte &nbsp; <b>Shift</b> correr &nbsp; <b>Espacio</b> saltar</div>
       <div><b>Mouse</b> mirar / apuntar &nbsp; <b>Click</b> disparar o golpear</div>
       <div><b>1/2/3</b> cambiar arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda &nbsp; <b>Esc</b> pausa</div>
@@ -200,7 +266,7 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;}
       <button id="soundBtn" class="mini-btn">🔊 Sonido: ON</button>
       <button id="restartBtn" class="mini-btn">🔁 Reiniciar Partida</button>
     </div>
-    <div class="controls-card">
+    <div class="controls-card" id="controlsCardPause">
       <div><b>WASD</b> moverte &nbsp; <b>Shift</b> correr &nbsp; <b>Espacio</b> saltar</div>
       <div><b>Click</b> atacar &nbsp; <b>1/2/3</b> arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda</div>
     </div>
@@ -286,6 +352,29 @@ const WEAPONS = {
   escopeta:{key:'escopeta',name:'Escopeta',type:'ranged', dmg:10, cooldown:.8,  mag:6,  magSize:6,  reserve:0,  reloadTime:1.5, spread:.09, range:30, pellets:6, owned:false, cost:350}
 };
 const WEAPON_ORDER = ['pistola','bate','escopeta'];
+const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints>0 || navigator.msMaxTouchPoints>0;
+const TOUCH_CONTROLS_HTML =
+  '<div><b>Joystick</b> (izquierda) moverte &nbsp; <b>Arrastrar</b> (derecha) mirar/apuntar</div>'+
+  '<div><b>🔫</b> disparar o golpear &nbsp; <b>⤴</b> saltar</div>'+
+  '<div><b>1/2/3</b> cambiar arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda &nbsp; <b>⏸</b> pausa</div>'+
+  '<div style="margin-top:8px;color:#e6c56b;">Objetivo: dominá los 5 barrios rivales y quedate con toda la ciudad.</div>';
+let deviceModeApplied=false;
+function updateDeviceMode(){
+  document.body.classList.toggle('touch-mode', isTouchDevice);
+  document.body.classList.toggle('portrait', innerHeight>innerWidth);
+  if(isTouchDevice && !deviceModeApplied){
+    deviceModeApplied=true;
+    const startCard = document.getElementById('controlsCardStart');
+    if(startCard) startCard.innerHTML = TOUCH_CONTROLS_HTML;
+    const pauseCard = document.getElementById('controlsCardPause');
+    if(pauseCard) pauseCard.innerHTML = '<div><b>Joystick</b> moverte &nbsp; <b>Arrastrar</b> mirar</div><div><b>🔫</b> atacar &nbsp; <b>1/2/3</b> arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda</div>';
+    const pHint = document.getElementById('portraitHint');
+    if(pHint){
+      pHint.addEventListener('click', ()=> pHint.classList.add('dismissed'));
+      setTimeout(()=> pHint.classList.add('dismissed'), 4500);
+    }
+  }
+}
 
 /* ---------- Global state ---------- */
 const G = {
@@ -293,7 +382,7 @@ const G = {
   playing:false, menuState:'start', // start|none|pause|shop|gameover|victory
   locked:false, soundOn:true, audioCtx:null,
   camYaw:0, camPitch:.28, camDist:7.5,
-  input:{f:0,b:0,l:0,r:0,run:false,jump:false,mouseDown:false},
+  input:{f:0,b:0,l:0,r:0,run:false,jump:false,mouseDown:false,jx:0,jy:0},
   player:null, enemies:[], projectiles:[], buildingAABBs:[],
   barrios:[], popups:[],
   startTime:0,
@@ -470,6 +559,7 @@ function onResize(){
   G.camera.aspect = innerWidth/innerHeight;
   G.camera.updateProjectionMatrix();
   G.renderer.setSize(innerWidth, innerHeight);
+  updateDeviceMode();
 }
 
 /* ---------- Player mesh ---------- */
@@ -613,12 +703,7 @@ function setupInput(){
       case 'Digit2': switchWeapon('bate'); break;
       case 'Digit3': switchWeapon('escopeta'); break;
       case 'KeyR': tryReload(); break;
-      case 'KeyB':
-        if(G.playing){
-          if(G.menuState==='none') openShop();
-          else if(G.menuState==='shop') closeShop();
-        }
-        break;
+      case 'KeyB': toggleShop(); break;
     }
   });
   window.addEventListener('keyup', e=>{
@@ -650,6 +735,78 @@ function setupInput(){
   });
   document.getElementById('lockPrompt').addEventListener('click', ()=>{
     canvas.requestPointerLock();
+  });
+}
+
+/* ---------- touch controls (mobile: virtual joystick, drag-look, fire/jump buttons) ---------- */
+function setupTouchControls(){
+  const lookZone = document.getElementById('lookZone');
+  const joyBase = document.getElementById('joystickBase');
+  const joyKnob = document.getElementById('joystickKnob');
+  const fireBtn = document.getElementById('fireBtn');
+  const jumpBtn = document.getElementById('jumpBtn');
+  const JOY_RADIUS = 50;
+  let joyId=null, joyCenter={x:0,y:0};
+  let lookId=null, lookLast={x:0,y:0};
+
+  lookZone.addEventListener('pointerdown', e=>{
+    if(!G.playing || G.menuState!=='none') return;
+    if(e.clientX < innerWidth*0.5 && joyId===null){
+      joyId = e.pointerId;
+      joyCenter = {x:e.clientX, y:e.clientY};
+      joyBase.style.left = joyCenter.x+'px';
+      joyBase.style.top = joyCenter.y+'px';
+      joyBase.style.display = 'block';
+      joyKnob.style.transform = 'translate(-50%,-50%)';
+      lookZone.setPointerCapture(e.pointerId);
+    } else if(e.clientX >= innerWidth*0.5 && lookId===null){
+      lookId = e.pointerId;
+      lookLast = {x:e.clientX, y:e.clientY};
+      lookZone.setPointerCapture(e.pointerId);
+    }
+  });
+  lookZone.addEventListener('pointermove', e=>{
+    if(e.pointerId===joyId){
+      let dx=e.clientX-joyCenter.x, dy=e.clientY-joyCenter.y;
+      const d=Math.hypot(dx,dy);
+      if(d>JOY_RADIUS){ dx=dx/d*JOY_RADIUS; dy=dy/d*JOY_RADIUS; }
+      joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      G.input.jx = dx/JOY_RADIUS;
+      G.input.jy = dy/JOY_RADIUS;
+    } else if(e.pointerId===lookId){
+      const dx=e.clientX-lookLast.x, dy=e.clientY-lookLast.y;
+      G.camYaw -= dx*0.0032;
+      G.camPitch -= dy*0.0028;
+      G.camPitch = Math.max(-0.15, Math.min(1.05, G.camPitch));
+      lookLast = {x:e.clientX, y:e.clientY};
+    }
+  });
+  function releasePointer(e){
+    if(e.pointerId===joyId){
+      joyId=null; joyBase.style.display='none'; G.input.jx=0; G.input.jy=0;
+    } else if(e.pointerId===lookId){
+      lookId=null;
+    }
+  }
+  lookZone.addEventListener('pointerup', releasePointer);
+  lookZone.addEventListener('pointercancel', releasePointer);
+
+  fireBtn.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    if(!G.playing || G.menuState!=='none') return;
+    ensureAudio();
+    G.input.mouseDown = true;
+    try{ fireBtn.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  ['pointerup','pointercancel','pointerleave'].forEach(ev=>fireBtn.addEventListener(ev, ()=>{ G.input.mouseDown=false; }));
+
+  jumpBtn.addEventListener('pointerdown', e=>{ e.preventDefault(); tryJump(); });
+
+  document.getElementById('pauseBtnTouch').addEventListener('click', requestPause);
+  document.getElementById('shopBtnTouch').addEventListener('click', toggleShop);
+  document.getElementById('reloadBtn').addEventListener('click', tryReload);
+  document.querySelectorAll('.wkey[data-w]').forEach(btn=>{
+    btn.addEventListener('click', ()=> switchWeapon(btn.dataset.w));
   });
 }
 
@@ -725,9 +882,12 @@ function updatePlayer(dt){
   let mx=0, mz=0;
   mx += fx*G.input.f - fx*G.input.b + rx*G.input.r - rx*G.input.l;
   mz += fz*G.input.f - fz*G.input.b + rz*G.input.r - rz*G.input.l;
-  const len = Math.hypot(mx,mz);
-  const speed = (G.input.run?7.6:4.6);
-  if(len>0.001){ mx/=len; mz/=len; }
+  // virtual joystick (touch): proportional to how far the stick is pushed
+  mx += fx*(-G.input.jy) + rx*G.input.jx;
+  mz += fz*(-G.input.jy) + rz*G.input.jx;
+  let len = Math.hypot(mx,mz);
+  const speed = (G.input.run || len>0.85) ? 7.6 : 4.6;
+  if(len>1){ mx/=len; mz/=len; len=1; }
   let nx = pl.group.position.x + mx*speed*dt;
   let nz = pl.group.position.z + mz*speed*dt;
   const resolved = resolveBuildingCollision(nx,nz,.5);
@@ -1042,6 +1202,11 @@ function updateHUD(){
   const w = pl.weapons[pl.weapon];
   document.getElementById('weaponName').textContent = w.name;
   document.getElementById('ammoText').textContent = w.type==='ranged' ? (pl.reloading?'recargando...':(w.mag+' / '+w.reserve)) : '';
+  document.querySelectorAll('.wkey[data-w]').forEach(btn=>{
+    const key = btn.dataset.w;
+    btn.classList.toggle('active', key===pl.weapon);
+    btn.classList.toggle('locked', !pl.weapons[key].owned);
+  });
 
   let list = '';
   G.barrios.forEach(b=>{
@@ -1088,19 +1253,29 @@ function openPause(){
 function closePause(){
   G.menuState='none';
   document.getElementById('pauseMenu').classList.add('hidden');
-  document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
+}
+function requestPause(){
+  if(!G.playing || G.menuState!=='none') return;
+  if(G.locked){ document.exitPointerLock(); } // pointerlockchange handler opens the pause menu
+  else { openPause(); }
 }
 
 function openShop(){
   G.menuState='shop';
   renderShop();
   document.getElementById('shopMenu').classList.remove('hidden');
-  document.exitPointerLock();
+  if(G.locked) document.exitPointerLock();
 }
 function closeShop(){
   G.menuState='none';
   document.getElementById('shopMenu').classList.add('hidden');
-  document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
+}
+function toggleShop(){
+  if(!G.playing) return;
+  if(G.menuState==='none') openShop();
+  else if(G.menuState==='shop') closeShop();
 }
 
 function shopItems(){
@@ -1174,7 +1349,7 @@ function respawnPlayer(){
   pl.velY=0; pl.grounded=true;
   G.menuState='none';
   document.getElementById('gameOverScreen').classList.add('hidden');
-  document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
 }
 
 function triggerVictory(){
@@ -1197,7 +1372,9 @@ function startGame(){
   document.getElementById('hud').classList.remove('hidden');
   G.playing=true; G.menuState='none';
   G.startTime = performance.now();
-  try{ document.getElementById('gameCanvas').requestPointerLock(); }catch(e){}
+  if(!isTouchDevice){
+    try{ document.getElementById('gameCanvas').requestPointerLock(); }catch(e){}
+  }
 }
 
 /* ---------- fatal error diagnostics (so a failed boot is never a silently dead button) ---------- */
@@ -1255,7 +1432,7 @@ function resetGame(){
   document.getElementById('gameOverScreen').classList.add('hidden');
   document.getElementById('pauseMenu').classList.add('hidden');
   G.menuState='none';
-  document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
 }
 
 /* ============================================================
@@ -1304,6 +1481,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
   try{
     initScene();
     setupInput();
+    setupTouchControls();
+    updateDeviceMode();
     animate();
   }catch(err){
     G.bootError = err;
