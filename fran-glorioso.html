@@ -1191,13 +1191,35 @@ function triggerVictory(){
    GAME LIFECYCLE
    ============================================================ */
 function startGame(){
+  if(!G.renderer){ showFatalError(G.bootError||new Error('El motor 3D no se inicializó.')); return; }
   ensureAudio();
   document.getElementById('startScreen').classList.add('hidden');
   document.getElementById('hud').classList.remove('hidden');
   G.playing=true; G.menuState='none';
   G.startTime = performance.now();
-  document.getElementById('gameCanvas').requestPointerLock();
+  try{ document.getElementById('gameCanvas').requestPointerLock(); }catch(e){}
 }
+
+/* ---------- fatal error diagnostics (so a failed boot is never a silently dead button) ---------- */
+function showFatalError(err){
+  console.error('Fran Glorioso - fatal error:', err);
+  let box = document.getElementById('fatalErrorBox');
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'fatalErrorBox';
+    box.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;'+
+      'background:rgba(0,0,0,.92);color:#fff;font-family:Georgia,serif;text-align:center;padding:24px;';
+    box.innerHTML = '<div style="max-width:560px;border:2px solid #e63946;border-radius:14px;padding:24px 28px;background:#16070a;">'+
+      '<div style="font-size:1.6rem;font-weight:900;color:#e63946;margin-bottom:10px;">No se pudo iniciar el juego 3D</div>'+
+      '<div style="font-size:.95rem;color:#e8e2cf;line-height:1.5;margin-bottom:14px;">Es probable que tu navegador tenga WebGL deshabilitado o la aceleración por hardware apagada. '+
+      'Probá: activar "aceleración por hardware" en la configuración del navegador, actualizar los drivers de video, o abrir el archivo en Chrome/Edge/Firefox actualizados.</div>'+
+      '<div id="fatalErrorDetail" style="font-size:.72rem;color:#a89;word-break:break-word;background:rgba(255,255,255,.05);padding:8px;border-radius:8px;"></div></div>';
+    document.body.appendChild(box);
+  }
+  document.getElementById('fatalErrorDetail').textContent = 'Detalle: '+(err&&err.message?err.message:String(err));
+  box.style.display='flex';
+}
+window.addEventListener('error', e=>{ if(!G.playing && !G.renderer) showFatalError(e.error||e.message); });
 
 function resetGame(){
   // remove enemies
@@ -1263,9 +1285,8 @@ function animate(){
    BOOT
    ============================================================ */
 window.addEventListener('DOMContentLoaded', ()=>{
-  initScene();
-  setupInput();
-
+  // Wire every button FIRST, independent of whether 3D init below succeeds,
+  // so a WebGL/init failure never leaves controls silently dead.
   document.getElementById('playBtn').addEventListener('click', startGame);
   document.getElementById('resumeBtn').addEventListener('click', closePause);
   document.getElementById('restartBtn').addEventListener('click', resetGame);
@@ -1280,7 +1301,14 @@ window.addEventListener('DOMContentLoaded', ()=>{
     resetGame();
   });
 
-  animate();
+  try{
+    initScene();
+    setupInput();
+    animate();
+  }catch(err){
+    G.bootError = err;
+    showFatalError(err);
+  }
 });
 
 })();
