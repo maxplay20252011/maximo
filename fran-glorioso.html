@@ -187,6 +187,41 @@ body.touch-mode.portrait #portraitHint{display:flex;}
 <body>
 <canvas id="gameCanvas"></canvas>
 
+<script>
+/* Ultra-conservative watchdog (ES5 only, no dependency on anything below).
+   Runs before the game engine loads, so it can still show a message even if
+   the rest of the page fails to parse/run entirely (old browser, blocked
+   WebGL/JS, etc.) instead of leaving a silent black screen. */
+(function(){
+  function showBootFail(msg){
+    if(document.getElementById('fgBootFail')) return;
+    var box = document.createElement('div');
+    box.id = 'fgBootFail';
+    box.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#050505;color:#fff;font-family:Georgia,serif;text-align:center;padding:24px;';
+    box.innerHTML = '<div style="max-width:520px;border:2px solid #e63946;border-radius:14px;padding:24px;background:#16070a;">'+
+      '<div style="font-size:1.4rem;font-weight:900;color:#e63946;margin-bottom:10px;">El juego no pudo cargar</div>'+
+      '<div style="font-size:.9rem;color:#e8e2cf;line-height:1.5;margin-bottom:12px;">Probá abrirlo con Chrome, Firefox o Safari actualizados. Si lo abriste desde WhatsApp o una app de chat, guardalo primero y despues abrilo con el navegador (no con la vista previa).</div>'+
+      '<div style="font-size:.7rem;color:#a89;word-break:break-word;background:rgba(255,255,255,.05);padding:8px;border-radius:8px;">'+ (msg||'') +'</div></div>';
+    document.body.appendChild(box);
+  }
+  window.addEventListener('error', function(e){
+    if(!window.__franGloriosoBooted){
+      var loc = e.filename ? (' @ '+e.filename+':'+e.lineno+':'+e.colno) : '';
+      showBootFail(((e.message)||'Error desconocido')+loc);
+    }
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    if(!window.__franGloriosoBooted){
+      var r = e.reason;
+      showBootFail(r && r.message ? r.message : String(r));
+    }
+  });
+  setTimeout(function(){
+    if(!window.__franGloriosoBooted) showBootFail('Se agotó el tiempo de espera cargando el juego (más de 8 segundos sin arrancar).');
+  }, 8000);
+})();
+</script>
+
 <div id="lockPrompt" class="hidden">🔒 Click para retomar el control</div>
 <div id="hitFlash"></div>
 
@@ -1394,6 +1429,7 @@ function autoStartGame(){
 /* ---------- fatal error diagnostics (so a failed boot is never a silently dead button) ---------- */
 function showFatalError(err, isRuntimeCrash){
   console.error('Fran Glorioso - fatal error:', err);
+  window.__franGloriosoBooted = true; // our own diagnostic is showing; tell the early watchdog to stand down
   let box = document.getElementById('fatalErrorBox');
   if(!box){
     box = document.createElement('div');
@@ -1516,6 +1552,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     updateDeviceMode();
     animate();
     autoStartGame();
+    window.__franGloriosoBooted = true;
   }catch(err){
     G.bootError = err;
     showFatalError(err);
