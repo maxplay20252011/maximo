@@ -59,7 +59,6 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;touch-action:
 }
 .controls-card div{margin:4px 0;}
 .controls-card b{color:var(--gold);}
-.credits{margin-top:14px;font-size:.7rem;color:#7d7768;letter-spacing:1px;}
 
 /* ===== HUD ===== */
 #hud{position:fixed;inset:0;z-index:26;pointer-events:none;font-family:Georgia,serif;}
@@ -239,24 +238,6 @@ body.touch-mode.portrait #portraitHint{display:flex;}
 
 <div id="dmgPopupsLayer"></div>
 
-<!-- Start Screen -->
-<div id="startScreen" class="overlay">
-  <div class="panel">
-    <div class="title-main gold-text">FRAN GLORIOSO</div>
-    <div class="title-sub">Imperio de Barrio</div>
-    <div class="tagline">Un pibe cualquiera se convirtió en el capo que todos temen.<br>
-    Conquistá los barrios, fundí a las otras bandas y hacete dueño de la ciudad entera: guita, fierros y poder.</div>
-    <button id="playBtn" class="big-btn">Jugar</button>
-    <div class="controls-card" id="controlsCardStart">
-      <div><b>WASD</b> moverte &nbsp; <b>Shift</b> correr &nbsp; <b>Espacio</b> saltar</div>
-      <div><b>Mouse</b> mirar / apuntar &nbsp; <b>Click</b> disparar o golpear</div>
-      <div><b>1/2/3</b> cambiar arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda &nbsp; <b>Esc</b> pausa</div>
-      <div style="margin-top:8px;color:#e6c56b;">Objetivo: dominá los 5 barrios rivales y quedate con toda la ciudad.</div>
-    </div>
-    <div class="credits">Juego ficticio · sin fines apologéticos</div>
-  </div>
-</div>
-
 <!-- Pause Menu -->
 <div id="pauseMenu" class="overlay hidden">
   <div class="panel">
@@ -354,6 +335,15 @@ const WEAPONS = {
 const WEAPON_ORDER = ['pistola','bate','escopeta'];
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints>0 || navigator.msMaxTouchPoints>0;
 
+// requestPointerLock() can throw synchronously or return a Promise that rejects
+// (e.g. "user gesture required") — swallow both so it never surfaces as an error.
+function safeRequestPointerLock(el){
+  try{
+    const p = el.requestPointerLock();
+    if(p && typeof p.catch==='function') p.catch(()=>{});
+  }catch(e){}
+}
+
 // Binds both touch and mouse/click so buttons react the instant a finger lifts
 // (no 300ms synthetic-click delay, no lost taps from tiny finger movement).
 function bindTap(el, handler){
@@ -370,19 +360,12 @@ function bindTap(el, handler){
     handler(e);
   });
 }
-const TOUCH_CONTROLS_HTML =
-  '<div><b>Joystick</b> (izquierda) moverte &nbsp; <b>Arrastrar</b> (derecha) mirar/apuntar</div>'+
-  '<div><b>🔫</b> disparar o golpear &nbsp; <b>⤴</b> saltar</div>'+
-  '<div><b>1/2/3</b> cambiar arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda &nbsp; <b>⏸</b> pausa</div>'+
-  '<div style="margin-top:8px;color:#e6c56b;">Objetivo: dominá los 5 barrios rivales y quedate con toda la ciudad.</div>';
 let deviceModeApplied=false;
 function updateDeviceMode(){
   document.body.classList.toggle('touch-mode', isTouchDevice);
   document.body.classList.toggle('portrait', innerHeight>innerWidth);
   if(isTouchDevice && !deviceModeApplied){
     deviceModeApplied=true;
-    const startCard = document.getElementById('controlsCardStart');
-    if(startCard) startCard.innerHTML = TOUCH_CONTROLS_HTML;
     const pauseCard = document.getElementById('controlsCardPause');
     if(pauseCard) pauseCard.innerHTML = '<div><b>Joystick</b> moverte &nbsp; <b>Arrastrar</b> mirar</div><div><b>🔫</b> atacar &nbsp; <b>1/2/3</b> arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda</div>';
     const pHint = document.getElementById('portraitHint');
@@ -751,7 +734,7 @@ function setupInput(){
     }
   });
   bindTap(document.getElementById('lockPrompt'), ()=>{
-    canvas.requestPointerLock();
+    safeRequestPointerLock(canvas);
   });
 }
 
@@ -1270,7 +1253,7 @@ function openPause(){
 function closePause(){
   G.menuState='none';
   document.getElementById('pauseMenu').classList.add('hidden');
-  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) safeRequestPointerLock(document.getElementById('gameCanvas'));
 }
 function requestPause(){
   if(!G.playing || G.menuState!=='none') return;
@@ -1287,7 +1270,7 @@ function openShop(){
 function closeShop(){
   G.menuState='none';
   document.getElementById('shopMenu').classList.add('hidden');
-  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) safeRequestPointerLock(document.getElementById('gameCanvas'));
 }
 function toggleShop(){
   if(!G.playing) return;
@@ -1366,7 +1349,7 @@ function respawnPlayer(){
   pl.velY=0; pl.grounded=true;
   G.menuState='none';
   document.getElementById('gameOverScreen').classList.add('hidden');
-  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) safeRequestPointerLock(document.getElementById('gameCanvas'));
 }
 
 function triggerVictory(){
@@ -1385,12 +1368,26 @@ function triggerVictory(){
 function startGame(){
   if(!G.renderer){ showFatalError(G.bootError||new Error('El motor 3D no se inicializó.')); return; }
   ensureAudio();
-  document.getElementById('startScreen').classList.add('hidden');
   document.getElementById('hud').classList.remove('hidden');
   G.playing=true; G.menuState='none';
   G.startTime = performance.now();
   if(!isTouchDevice){
-    try{ document.getElementById('gameCanvas').requestPointerLock(); }catch(e){}
+    safeRequestPointerLock(document.getElementById('gameCanvas'));
+  }
+}
+
+/* Boots straight into gameplay, no menu to press first. Browsers only allow
+   Pointer Lock / audio to start from a real user gesture, so on desktop we
+   drop the player right into the (already-moving) game and surface the
+   lockPrompt as the one unavoidable "click to aim" gesture; touch devices
+   need no gesture at all and just start playing immediately. */
+function autoStartGame(){
+  startGame();
+  showBanner('FRAN GLORIOSO · Imperio de Barrio');
+  if(!isTouchDevice && !G.locked){
+    const lp = document.getElementById('lockPrompt');
+    lp.textContent = '🔒 Click para apuntar y disparar';
+    lp.classList.remove('hidden');
   }
 }
 
@@ -1449,7 +1446,7 @@ function resetGame(){
   document.getElementById('gameOverScreen').classList.add('hidden');
   document.getElementById('pauseMenu').classList.add('hidden');
   G.menuState='none';
-  if(!isTouchDevice) document.getElementById('gameCanvas').requestPointerLock();
+  if(!isTouchDevice) safeRequestPointerLock(document.getElementById('gameCanvas'));
 }
 
 /* ============================================================
@@ -1481,7 +1478,6 @@ function animate(){
 window.addEventListener('DOMContentLoaded', ()=>{
   // Wire every button FIRST, independent of whether 3D init below succeeds,
   // so a WebGL/init failure never leaves controls silently dead.
-  bindTap(document.getElementById('playBtn'), startGame);
   bindTap(document.getElementById('resumeBtn'), closePause);
   bindTap(document.getElementById('restartBtn'), resetGame);
   bindTap(document.getElementById('soundBtn'), (e)=>{
@@ -1501,6 +1497,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     setupTouchControls();
     updateDeviceMode();
     animate();
+    autoStartGame();
   }catch(err){
     G.bootError = err;
     showFatalError(err);
