@@ -14,7 +14,7 @@
 html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Georgia,'Times New Roman',serif;}
 canvas#gameCanvas{display:block;position:fixed;inset:0;outline:none;cursor:crosshair;}
 .hidden{display:none !important;}
-button{font-family:inherit;cursor:pointer;border:none;outline:none;}
+button{font-family:inherit;cursor:pointer;border:none;outline:none;touch-action:manipulation;}
 .gold-text{background:linear-gradient(135deg,#fff6c8,#ffd700 40%,#a8790a);-webkit-background-clip:text;background-clip:text;color:transparent;}
 ::-webkit-scrollbar{width:8px;}
 ::-webkit-scrollbar-thumb{background:var(--gold-dim);border-radius:4px;}
@@ -24,7 +24,7 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;}
   position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:radial-gradient(ellipse at center,rgba(30,10,10,.75),rgba(0,0,0,.95));
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-  text-align:center;padding:20px;overflow-y:auto;
+  text-align:center;padding:20px;overflow-y:auto;touch-action:manipulation;
 }
 .panel{
   background:linear-gradient(160deg,var(--dark2),var(--dark));
@@ -124,7 +124,7 @@ body.touch-mode #touchControls{display:block;}
 #jumpBtn:active{transform:scale(.9);background:rgba(255,255,255,.28);}
 
 #portraitHint{position:fixed;top:0;left:0;right:0;z-index:60;display:none;align-items:center;justify-content:center;gap:10px;
-  background:rgba(20,10,0,.92);color:#f2ecd8;text-align:center;padding:9px 16px;font-size:.8rem;cursor:pointer;
+  background:rgba(20,10,0,.92);color:#f2ecd8;text-align:center;padding:9px 16px;font-size:.8rem;cursor:pointer;touch-action:manipulation;
   border-bottom:1px solid rgba(255,215,0,.4);}
 body.touch-mode.portrait #portraitHint{display:flex;}
 #portraitHint.dismissed{display:none !important;}
@@ -158,7 +158,7 @@ body.touch-mode.portrait #portraitHint{display:flex;}
 #hint.show{opacity:1;}
 
 #lockPrompt{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
-  background:rgba(0,0,0,.55);color:#fff;font-size:1.4rem;font-weight:700;letter-spacing:1px;cursor:pointer;}
+  background:rgba(0,0,0,.55);color:#fff;font-size:1.4rem;font-weight:700;letter-spacing:1px;cursor:pointer;touch-action:manipulation;}
 
 #hitFlash{position:fixed;inset:0;z-index:30;pointer-events:none;opacity:0;
   background:radial-gradient(ellipse at center,rgba(230,57,70,0) 40%,rgba(230,57,70,.55) 100%);
@@ -353,6 +353,23 @@ const WEAPONS = {
 };
 const WEAPON_ORDER = ['pistola','bate','escopeta'];
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints>0 || navigator.msMaxTouchPoints>0;
+
+// Binds both touch and mouse/click so buttons react the instant a finger lifts
+// (no 300ms synthetic-click delay, no lost taps from tiny finger movement).
+function bindTap(el, handler){
+  if(!el) return;
+  let touched = false;
+  el.addEventListener('touchend', e=>{
+    touched = true;
+    e.preventDefault();
+    handler(e);
+    setTimeout(()=>{ touched=false; }, 500);
+  }, {passive:false});
+  el.addEventListener('click', e=>{
+    if(touched) return;
+    handler(e);
+  });
+}
 const TOUCH_CONTROLS_HTML =
   '<div><b>Joystick</b> (izquierda) moverte &nbsp; <b>Arrastrar</b> (derecha) mirar/apuntar</div>'+
   '<div><b>🔫</b> disparar o golpear &nbsp; <b>⤴</b> saltar</div>'+
@@ -370,7 +387,7 @@ function updateDeviceMode(){
     if(pauseCard) pauseCard.innerHTML = '<div><b>Joystick</b> moverte &nbsp; <b>Arrastrar</b> mirar</div><div><b>🔫</b> atacar &nbsp; <b>1/2/3</b> arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda</div>';
     const pHint = document.getElementById('portraitHint');
     if(pHint){
-      pHint.addEventListener('click', ()=> pHint.classList.add('dismissed'));
+      bindTap(pHint, ()=> pHint.classList.add('dismissed'));
       setTimeout(()=> pHint.classList.add('dismissed'), 4500);
     }
   }
@@ -733,7 +750,7 @@ function setupInput(){
       openPause();
     }
   });
-  document.getElementById('lockPrompt').addEventListener('click', ()=>{
+  bindTap(document.getElementById('lockPrompt'), ()=>{
     canvas.requestPointerLock();
   });
 }
@@ -802,11 +819,11 @@ function setupTouchControls(){
 
   jumpBtn.addEventListener('pointerdown', e=>{ e.preventDefault(); tryJump(); });
 
-  document.getElementById('pauseBtnTouch').addEventListener('click', requestPause);
-  document.getElementById('shopBtnTouch').addEventListener('click', toggleShop);
-  document.getElementById('reloadBtn').addEventListener('click', tryReload);
+  bindTap(document.getElementById('pauseBtnTouch'), requestPause);
+  bindTap(document.getElementById('shopBtnTouch'), toggleShop);
+  bindTap(document.getElementById('reloadBtn'), tryReload);
   document.querySelectorAll('.wkey[data-w]').forEach(btn=>{
-    btn.addEventListener('click', ()=> switchWeapon(btn.dataset.w));
+    bindTap(btn, ()=> switchWeapon(btn.dataset.w));
   });
 }
 
@@ -1319,7 +1336,7 @@ function renderShop(){
     div.className='shop-item';
     div.innerHTML = '<h4>'+item.name+'</h4><p>'+item.desc+'</p><div class="price">$'+item.cost+'</div>'+
       '<button class="shop-buy" '+(canAfford?'':'disabled')+'>Comprar</button>';
-    div.querySelector('button').addEventListener('click', ()=>{
+    bindTap(div.querySelector('button'), ()=>{
       if(G.player.money<item.cost || item.disabled) return;
       G.player.money -= item.cost;
       item.action();
@@ -1464,16 +1481,16 @@ function animate(){
 window.addEventListener('DOMContentLoaded', ()=>{
   // Wire every button FIRST, independent of whether 3D init below succeeds,
   // so a WebGL/init failure never leaves controls silently dead.
-  document.getElementById('playBtn').addEventListener('click', startGame);
-  document.getElementById('resumeBtn').addEventListener('click', closePause);
-  document.getElementById('restartBtn').addEventListener('click', resetGame);
-  document.getElementById('soundBtn').addEventListener('click', (e)=>{
+  bindTap(document.getElementById('playBtn'), startGame);
+  bindTap(document.getElementById('resumeBtn'), closePause);
+  bindTap(document.getElementById('restartBtn'), resetGame);
+  bindTap(document.getElementById('soundBtn'), (e)=>{
     G.soundOn=!G.soundOn;
     e.target.textContent = G.soundOn?'🔊 Sonido: ON':'🔇 Sonido: OFF';
   });
-  document.getElementById('closeShopBtn').addEventListener('click', closeShop);
-  document.getElementById('continueBtn').addEventListener('click', respawnPlayer);
-  document.getElementById('playAgainBtn').addEventListener('click', ()=>{
+  bindTap(document.getElementById('closeShopBtn'), closeShop);
+  bindTap(document.getElementById('continueBtn'), respawnPlayer);
+  bindTap(document.getElementById('playAgainBtn'), ()=>{
     document.getElementById('victoryScreen').classList.add('hidden');
     resetGame();
   });
