@@ -254,6 +254,8 @@ body.touch-mode.portrait #portraitHint{display:flex;}
     <div class="stat-row"><span class="ic">❤️</span><div class="bar-track"><div id="hpFill" class="bar-fill" style="width:100%"></div></div><span id="hpText">100</span></div>
     <div class="stat-row"><span class="ic">⚡</span><div class="bar-track"><div id="powerFill" class="bar-fill" style="width:0%"></div></div><span id="powerText">0</span></div>
     <div class="stat-row"><span class="ic">💰</span><span id="moneyText">$0</span></div>
+    <div class="stat-row"><span class="ic">📈</span><span id="incomeText">+$0/min</span></div>
+    <div class="stat-row"><span class="ic">🏢</span><span id="buildingsText">0 edificios</span></div>
   </div>
 
   <div id="minimapWrap" class="hud-panel">
@@ -510,7 +512,7 @@ const G = {
   camYaw:0, camPitch:.28, camYawTarget:0, camPitchTarget:.28, camDist:CAMERA_CONFIG.distance,
   dragLook:{active:false, lastX:0, lastY:0},
   input:{f:0,b:0,l:0,r:0,run:false,jump:false,mouseDown:false,jx:0,jy:0},
-  player:null, enemies:[], projectiles:[], buildingAABBs:[], buildingMeshes:[],
+  player:null, enemies:[], projectiles:[], buildingAABBs:[], buildingMeshes:[], allies:[],
   barrios:[], popups:[],
   startTime:0,
   orbitAngle:0,
@@ -520,6 +522,7 @@ const G = {
   // look — see updateTransitProximity().
   transitPoints:[],
   nearTransitPoint:null,
+  nearBuildingDoor:null,
   // Streaming: recomputed on a timer (not every frame) in updateWorldStreaming.
   streamTimer:0,
   // Rideable motorcycle — see createVehicle()/updateVehicle().
@@ -531,7 +534,20 @@ const G = {
   // updateFollowCamera) now that the map is much bigger than either was
   // originally sized for.
   skyMesh:null, sunLight:null,
+  // Building interiors — see buildInterior()/enterBuilding()/exitInterior().
+  // Only ONE interior is ever loaded at a time, built at a fixed location
+  // far from the city (so the outdoor world simply fog/far-clips out of
+  // view — no scene-swapping needed) and reused for whichever building the
+  // player is currently in.
+  interior:{
+    active:false, group:null, building:null,
+    wallAABBs:[], wallMeshes:[], enemies:[], stairs:[],
+    exitTrigger:null, spawnLocal:null, outdoorReturnPos:null,
+  },
+  outdoorBuildingNear:null,
 };
+// Fixed world location the interior "stage" lives at.
+const INTERIOR_ORIGIN = {x:6000, z:6000};
 
 /* ============================================================
    AUDIO (synth, no external files)
@@ -687,6 +703,13 @@ function initScene(){
   // The player's parked motorcycle, near the home plaza.
   G.vehicle = createVehicle(10, 14);
 
+  // Building interiors all reuse this one group, positioned far from the
+  // city (see INTERIOR_ORIGIN) so the outdoor world naturally fog/far-clips
+  // out of view whenever it's in use.
+  G.interior.group = new THREE.Group();
+  G.interior.group.position.set(INTERIOR_ORIGIN.x, 0, INTERIOR_ORIGIN.z);
+  G.scene.add(G.interior.group);
+
   // Build detail immediately for whatever district the player starts in
   // (home) so they never spawn into an empty shell; everything else streams
   // in as they approach it.
@@ -759,7 +782,9 @@ function createPlayer(){
     weapons: JSON.parse(JSON.stringify(WEAPONS)),
     cooldown:0, reloading:false, reloadTimer:0,
     lastHitTime:-10,
-    dead:false
+    dead:false,
+    interiorFloorY:0,
+    buildingsOwned:0
   };
 }
 
@@ -835,6 +860,7 @@ function createEnemy(barrio, x, z, opts){
 
   G.scene.add(group);
 
+  const indoor = !!opts.indoor;
   const enemy = {
     group, hbar, hitMesh, barrio,
     kind:opts.kind, hp:opts.hp, maxHp:opts.hp, dmg:opts.dmg,
@@ -842,10 +868,15 @@ function createEnemy(barrio, x, z, opts){
     cooldownMax:opts.cooldown, cooldown: Math.random()*opts.cooldown,
     moneyMin:opts.moneyMin, moneyMax:opts.moneyMax, powerReward:opts.powerReward,
     state:'idle', waypoint:{x,z}, alive:true,
-    homeX:x, homeZ:z, boundsCenter:{x:barrio.x,z:barrio.z}, boundsRadius:barrio.size/2-3
+    homeX:x, homeZ:z,
+    boundsCenter: indoor ? {x, z} : {x:barrio.x,z:barrio.z},
+    boundsRadius: indoor ? (opts.roomRadius||5) : barrio.size/2-3,
+    // Interior-only fields — see updateEnemies()'s indoor branch and
+    // spawnInteriorEnemies(). Outdoor enemies leave these as null/false.
+    indoor, building: opts.building||null, roomBounds: opts.roomBounds||null,
   };
   hitMesh.userData.enemyRef = enemy;
-  barrio.enemyList.push(enemy);
+  if(!indoor) barrio.enemyList.push(enemy); // indoor enemies are tracked on building.enemiesRemaining instead
   G.enemies.push(enemy);
   return enemy;
 }
@@ -903,6 +934,62 @@ const DISTRICT_IDENTITY = {
   comercial:   { heightRange:[6,14],  palette:[0x5c6e78,0x46545c,0x6d818c,0x3e4a52], parkSize:0.85, blockCount:4 },
   mercado:     { heightRange:[3,7],   palette:[0x8a4a3a,0x9c5a3a,0x704228,0x6e3c28], parkSize:1.1,  blockCount:5 },
   fortaleza:   { heightRange:[10,24], palette:[0x2a1418,0x3a1a1e,0x1e0e10,0x241012], parkSize:0.6,  blockCount:3 },
+};
+
+/* ============================================================
+   CONQUERABLE BUILDINGS — types, interior archetypes, furniture
+   ============================================================
+   Every building placed in a rival district (see buildBarrioDetail) is one
+   of these types. `archetype` picks its interior SHAPE (footprint range,
+   how many floors/rooms, how many defenders) from BUILDING_ARCHETYPES;
+   `furn` picks which FURNITURE_SETS dresses each room. This is what lets 17
+   named building types share a small, maintainable interior generator
+   while still each having a distinct name/color/income/footprint. */
+const FLOOR_H = 4.2;   // interior floor-to-floor height
+const WALL_T = 0.3;    // interior wall thickness
+const BUILDING_ARCHETYPES = {
+  // footprint:[minSize,maxSize] in world units (square-ish footprint), floors:[min,max]
+  small:  { footprint:[7,10],  floors:[1,1], roomsPerFloor:1, enemies:[1,2] },
+  medium: { footprint:[11,15], floors:[1,2], roomsPerFloor:2, enemies:[2,3] },
+  large:  { footprint:[15,20], floors:[2,3], roomsPerFloor:2, enemies:[3,5] },
+  huge:   { footprint:[22,28], floors:[1,2], roomsPerFloor:3, enemies:[5,7] },
+};
+const BUILDING_TYPES = {
+  casa:            {name:'Casa',             archetype:'small',  income:2,  color:0x8a6f55, furn:'home'},
+  departamento:    {name:'Departamento',     archetype:'medium', income:4,  color:0x7a6a8a, furn:'home'},
+  tienda:          {name:'Tienda',           archetype:'small',  income:3,  color:0x3d8bff, furn:'shop'},
+  supermercado:    {name:'Supermercado',     archetype:'medium', income:6,  color:0x3ddc84, furn:'shop'},
+  restaurante:     {name:'Restaurante',      archetype:'medium', income:7,  color:0xe8622a, furn:'dine'},
+  banco:           {name:'Banco',            archetype:'large',  income:22, color:0xffd700, furn:'office'},
+  hospital:        {name:'Hospital',         archetype:'large',  income:14, color:0xf2f2f2, furn:'office'},
+  escuela:         {name:'Escuela',          archetype:'large',  income:9,  color:0xe6c65c, furn:'office'},
+  comisaria:       {name:'Comisaría',        archetype:'medium', income:8,  color:0x3d5aff, furn:'office'},
+  galpon:          {name:'Galpón',           archetype:'medium', income:9,  color:0x5c5148, furn:'industrial'},
+  fabrica:         {name:'Fábrica',          archetype:'large',  income:18, color:0x4a4a52, furn:'industrial'},
+  oficina:         {name:'Oficina',          archetype:'large',  income:13, color:0x4c5a66, furn:'office'},
+  taller:          {name:'Taller',           archetype:'small',  income:4,  color:0x704228, furn:'industrial'},
+  gimnasio:        {name:'Gimnasio',         archetype:'medium', income:6,  color:0xe63946, furn:'gym'},
+  hotel:           {name:'Hotel',            archetype:'large',  income:20, color:0xd6a44a, furn:'home'},
+  estacionamiento: {name:'Estacionamiento',  archetype:'medium', income:3,  color:0x555560, furn:'industrial'},
+  centroComercial: {name:'Centro Comercial', archetype:'huge',   income:30, color:0xffb84d, furn:'shop'},
+};
+// Which building types can appear in each district identity — matches the
+// district's own theme (see DISTRICT_IDENTITY).
+const DISTRICT_BUILDING_POOL = {
+  plaza:       ['tienda','restaurante','oficina'], // home district: decorative only, never conquerable
+  torres:      ['oficina','departamento','banco','hotel','estacionamiento'],
+  residencial: ['casa','departamento','tienda','gimnasio','escuela'],
+  comercial:   ['tienda','supermercado','restaurante','banco','centroComercial','estacionamiento'],
+  mercado:     ['tienda','restaurante','taller','supermercado','comisaria'],
+  fortaleza:   ['galpon','fabrica','taller','comisaria','estacionamiento'],
+};
+const FURNITURE_SETS = {
+  home:       ['bed','sofa','table','shelf'],
+  shop:       ['counter','shelf','shelf','crate'],
+  dine:       ['table','table','table','counter'],
+  office:     ['desk','desk','shelf','plant'],
+  industrial: ['crate','crate','machine','shelf'],
+  gym:        ['bench','machine','shelf'],
 };
 
 // Reused for every flat, oriented rectangle of ground (avenues, plaza
@@ -976,6 +1063,117 @@ function makeLamp(){
   head.position.y=3.2; g.add(head);
   return g;
 }
+/* ---------- indoor furniture (used by buildInterior, one per FURNITURE_SETS entry) ---------- */
+function makeBed(){
+  const g = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.5,.4,2.1), new THREE.MeshStandardMaterial({color:0x5a4128, roughness:.8}));
+  frame.position.y=.2; g.add(frame);
+  const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.4,.25,2), new THREE.MeshStandardMaterial({color:0xe6dcc8, roughness:.9}));
+  mattress.position.y=.52; g.add(mattress);
+  const pillow = new THREE.Mesh(new THREE.BoxGeometry(1.2,.15,.4), new THREE.MeshStandardMaterial({color:0xffffff}));
+  pillow.position.set(0,.68,-.75); g.add(pillow);
+  return g;
+}
+function makeSofa(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color:0x4a5a6e, roughness:.85});
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.8,.5,.8), mat);
+  base.position.y=.3; g.add(base);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.8,.7,.25), mat);
+  back.position.set(0,.7,-.32); g.add(back);
+  return g;
+}
+function makeTable(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color:0x6b4a30, roughness:.7});
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.3,.08,.8), mat);
+  top.position.y=.74; g.add(top);
+  [[-.55,-.32],[.55,-.32],[-.55,.32],[.55,.32]].forEach(([x,z])=>{
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(.08,.72,.08), mat);
+    leg.position.set(x,.36,z); g.add(leg);
+  });
+  return g;
+}
+function makeShelf(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color:0x4a4238, roughness:.8});
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.4,1.9,.4), mat);
+  frame.position.y=.95; g.add(frame);
+  for(let i=1;i<4;i++){
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(1.3,.05,.36), new THREE.MeshStandardMaterial({color:0x6b5a44}));
+    shelf.position.set(0,i*.45,0); g.add(shelf);
+  }
+  return g;
+}
+function makeCounter(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color:0x8a7048, roughness:.7});
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.0,.7), mat);
+  base.position.y=.5; g.add(base);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.3,.08,.8), new THREE.MeshStandardMaterial({color:0x2a2a2e}));
+  top.position.y=1.04; g.add(top);
+  return g;
+}
+function makeCrate(){
+  const g = new THREE.Group();
+  for(let i=0;i<3;i++){
+    const c = new THREE.Mesh(new THREE.BoxGeometry(.7,.7,.7), new THREE.MeshStandardMaterial({color:0x6b5230, roughness:.9}));
+    c.position.set((i%2)*.75, Math.floor(i/2)*.75+.35, 0);
+    g.add(c);
+  }
+  return g;
+}
+function makeDesk(){
+  const g = new THREE.Group();
+  const desk = makeTable();
+  g.add(desk);
+  const monitor = new THREE.Mesh(new THREE.BoxGeometry(.45,.32,.05), new THREE.MeshStandardMaterial({color:0x111111, emissive:0x1a3a5a, emissiveIntensity:.4}));
+  monitor.position.set(0,1.0,-.2); g.add(monitor);
+  const chair = new THREE.Mesh(new THREE.CylinderGeometry(.28,.24,.5,8), new THREE.MeshStandardMaterial({color:0x2a2a2e}));
+  chair.position.set(0,.25,.65); g.add(chair);
+  return g;
+}
+function makePlant(){
+  const g = new THREE.Group();
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(.25,.2,.4,10), new THREE.MeshStandardMaterial({color:0x6b4a30}));
+  pot.position.y=.2; g.add(pot);
+  const leaves = new THREE.Mesh(new THREE.SphereGeometry(.45,8,8), new THREE.MeshStandardMaterial({color:0x2e5a2e}));
+  leaves.position.y=.7; leaves.scale.y=1.3; g.add(leaves);
+  return g;
+}
+function makeMachine(){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.2,1.6,1.0), new THREE.MeshStandardMaterial({color:0x555560, metalness:.5, roughness:.5}));
+  body.position.y=.8; g.add(body);
+  const light = new THREE.Mesh(new THREE.SphereGeometry(.08,6,6), new THREE.MeshStandardMaterial({color:0xff4433, emissive:0xff2211, emissiveIntensity:.8}));
+  light.position.set(.4,1.4,.51); g.add(light);
+  return g;
+}
+function makeGymBench(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color:0x2a2a2e, roughness:.6});
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(1.4,.35,.5), new THREE.MeshStandardMaterial({color:0xaa1c2e}));
+  bench.position.y=.4; g.add(bench);
+  const rack = new THREE.Mesh(new THREE.BoxGeometry(.12,1.1,.12), mat);
+  rack.position.set(-.6,.55,0); g.add(rack);
+  const rack2 = rack.clone(); rack2.position.x=.6; g.add(rack2);
+  return g;
+}
+const FURNITURE_BUILDERS = {
+  bed:makeBed, sofa:makeSofa, table:makeTable, shelf:makeShelf, counter:makeCounter,
+  crate:makeCrate, desk:makeDesk, plant:makePlant, machine:makeMachine, bench:makeGymBench,
+};
+
+/* ---------- ceiling light fixture for interior rooms ---------- */
+function makeCeilingLamp(){
+  const g = new THREE.Group();
+  const fixture = new THREE.Mesh(new THREE.CylinderGeometry(.22,.3,.12,10), new THREE.MeshStandardMaterial({color:0x2a2a2e}));
+  g.add(fixture);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(.14,8,8), new THREE.MeshStandardMaterial({color:0xfff6d8, emissive:0xffe9a8, emissiveIntensity:.9}));
+  bulb.position.y=-.1; g.add(bulb);
+  return g;
+}
+
 function makeMetroEntrance(){
   const g = new THREE.Group();
   const stair = new THREE.Mesh(new THREE.BoxGeometry(2.2,.3,2.6), new THREE.MeshStandardMaterial({color:0x3a3a40, roughness:.8}));
@@ -1109,41 +1307,444 @@ function buildBarrioDetail(barrio){
     });
   }
 
-  // building blocks
-  const targetCount = identity.blockCount*(3+Math.floor(rand()*3));
+  // --- Buildings ---
+  // Home is player territory already — its buildings are pure decoration
+  // (same simple random boxes as before). Rival districts get real,
+  // conquerable, type-driven buildings with interiors — see
+  // instantiateBuildingMesh()/generateDistrictBuildings() below.
+  if(barrio.home){
+    const targetCount = identity.blockCount*(3+Math.floor(rand()*3));
+    const placed = [];
+    const GAP = 5;
+    for(let n=0;n<targetCount;n++){
+      let ok=false, x=0,z=0,w=0,d=0,h=0,hw=0,hd=0;
+      for(let tries=0; tries<24 && !ok; tries++){
+        x = barrio.x + (rand()*2-1)*half;
+        z = barrio.z + (rand()*2-1)*half;
+        w = 3+rand()*5; d = 3+rand()*5;
+        h = identity.heightRange[0] + rand()*(identity.heightRange[1]-identity.heightRange[0]);
+        hw = w/2+GAP/2; hd = d/2+GAP/2;
+        if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+Math.max(hw,hd)) continue;
+        if(Math.hypot(x-parkCX,z-parkCZ) < parkR+Math.max(hw,hd)) continue;
+        ok = true;
+        for(let i=0;i<placed.length && ok;i++){
+          const p = placed[i];
+          if(Math.abs(x-p.x) < hw+p.hw && Math.abs(z-p.z) < hd+p.hd) ok=false;
+        }
+      }
+      if(!ok) continue;
+      placed.push({x,z,hw,hd});
+      const col = identity.palette[Math.floor(rand()*identity.palette.length)];
+      const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color:col, roughness:.85}));
+      bMesh.position.set(x,h/2,z);
+      bMesh.castShadow=true; bMesh.receiveShadow=true;
+      barrio.detailGroup.add(bMesh);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(w*.7,.6,d*.7), new THREE.MeshStandardMaterial({color:0x201d18}));
+      roof.position.set(x,h+.3,z); roof.castShadow=true;
+      barrio.detailGroup.add(roof);
+      barrio.buildingAABBs.push({minX:x-w/2-.4, maxX:x+w/2+.4, minZ:z-d/2-.4, maxZ:z+d/2+.4});
+      barrio.buildingMeshes.push(bMesh);
+    }
+    return;
+  }
+
+  // First time this district is ever built: lay out its conquerable
+  // buildings' positions/types/sizes ONCE (persisted on barrio.buildings —
+  // ownership/enemy progress must survive streaming unload/reload, only the
+  // meshes themselves get torn down and recreated).
+  if(!barrio.buildings){
+    barrio.buildings = generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, parkR);
+  }
+  barrio.buildings.forEach(b=>instantiateBuildingMesh(b));
+}
+
+/* Picks positions/types/footprints for every conquerable building in a
+   district (rejection-sampled against the plaza/park/each other, same trick
+   as the old generic box buildings) and returns the persistent state
+   objects — called ONLY once per district, ever. */
+function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, parkR){
+  const pool = DISTRICT_BUILDING_POOL[barrio.layout] || DISTRICT_BUILDING_POOL.plaza;
+  const targetCount = 8 + Math.floor(rand()*5); // ~8-12 real, conquerable buildings per district
   const placed = [];
-  const GAP = 5; // minimum clear gap between buildings — this gap IS the street
-  for(let n=0;n<targetCount;n++){
-    let ok=false, x=0,z=0,w=0,d=0,h=0,hw=0,hd=0;
-    for(let tries=0; tries<24 && !ok; tries++){
+  const buildings = [];
+  const GAP = 6;
+  for(let n=0; n<targetCount; n++){
+    const typeKey = pool[Math.floor(rand()*pool.length)];
+    const type = BUILDING_TYPES[typeKey];
+    const arch = BUILDING_ARCHETYPES[type.archetype];
+    const size = arch.footprint[0] + rand()*(arch.footprint[1]-arch.footprint[0]);
+    const w = size, d = size*(0.8+rand()*0.4);
+    let ok=false, x=0, z=0, hw=0, hd=0;
+    for(let tries=0; tries<30 && !ok; tries++){
       x = barrio.x + (rand()*2-1)*half;
       z = barrio.z + (rand()*2-1)*half;
-      w = 3+rand()*5; d = 3+rand()*5;
-      h = identity.heightRange[0] + rand()*(identity.heightRange[1]-identity.heightRange[0]);
       hw = w/2+GAP/2; hd = d/2+GAP/2;
-      if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+Math.max(hw,hd)) continue; // keep plaza clear
-      if(Math.hypot(x-parkCX,z-parkCZ) < parkR+Math.max(hw,hd)) continue;      // keep park clear
+      if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+Math.max(hw,hd)) continue;
+      if(Math.hypot(x-parkCX,z-parkCZ) < parkR+Math.max(hw,hd)) continue;
       ok = true;
       for(let i=0;i<placed.length && ok;i++){
         const p = placed[i];
-        if(Math.abs(x-p.x) < hw+p.hw && Math.abs(z-p.z) < hd+p.hd) ok=false; // overlaps another block -> leave as street
+        if(Math.abs(x-p.x) < hw+p.hw && Math.abs(z-p.z) < hd+p.hd) ok=false;
       }
     }
-    if(!ok) continue; // no free spot found — that's fine, it just stays open street/lot
+    if(!ok) continue;
     placed.push({x,z,hw,hd});
 
-    const col = identity.palette[Math.floor(rand()*identity.palette.length)];
-    const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color:col, roughness:.85}));
-    bMesh.position.set(x,h/2,z);
-    bMesh.castShadow=true; bMesh.receiveShadow=true;
-    barrio.detailGroup.add(bMesh);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(w*.7,.6,d*.7), new THREE.MeshStandardMaterial({color:0x201d18}));
-    roof.position.set(x,h+.3,z); roof.castShadow=true;
-    barrio.detailGroup.add(roof);
-
-    barrio.buildingAABBs.push({minX:x-w/2-.4, maxX:x+w/2+.4, minZ:z-d/2-.4, maxZ:z+d/2+.4});
-    barrio.buildingMeshes.push(bMesh);
+    const floors = arch.floors[0] + Math.floor(rand()*(arch.floors[1]-arch.floors[0]+1));
+    const h = floors*FLOOR_H + 0.6;
+    const enemyCount = arch.enemies[0] + Math.floor(rand()*(arch.enemies[1]-arch.enemies[0]+1));
+    buildings.push({
+      id: barrio.id+'_b'+n, barrio, type:typeKey, x, z, w, d, h, floors,
+      owned:false, enemiesRemaining:enemyCount, enemyCountTotal:enemyCount,
+      mesh:null, roofMesh:null, emblemMesh:null,
+      doorPos:{x, z:z+d/2}, doorTrigger:{x, z:z+d/2+1.3},
+    });
   }
+  return buildings;
+}
+
+/* (Re)creates a conquerable building's exterior mesh/roof/AABB from its
+   persistent state — used on first placement AND every time streaming
+   rebuilds the district, so ownership always shows the right color. */
+function instantiateBuildingMesh(b){
+  const type = BUILDING_TYPES[b.type];
+  const col = b.owned ? 0xffd700 : type.color;
+  const bMesh = new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,b.d), new THREE.MeshStandardMaterial({color:col, roughness:.8}));
+  bMesh.position.set(b.x,b.h/2,b.z);
+  bMesh.castShadow=true; bMesh.receiveShadow=true;
+  bMesh.userData.building = b;
+  b.barrio.detailGroup.add(bMesh);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w*.75,.5,b.d*.75), new THREE.MeshStandardMaterial({color:0x1c1a16}));
+  roof.position.set(b.x,b.h+.25,b.z); roof.castShadow=true;
+  b.barrio.detailGroup.add(roof);
+  // door (visual): a dark inset on the south wall, at ground level
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.6,2.4,.1), new THREE.MeshStandardMaterial({color:0x120e0a}));
+  door.position.set(b.x, 1.2, b.z+b.d/2+0.06);
+  b.barrio.detailGroup.add(door);
+  // a small sign with the building's name, over the door
+  const sign = makeBuildingSign(type.name, col);
+  sign.position.set(b.x, 2.7, b.z+b.d/2+0.08);
+  b.barrio.detailGroup.add(sign);
+  b.mesh = bMesh; b.roofMesh = roof; b.doorMesh = door; b.signMesh = sign;
+  if(b.owned) addEmblem(b);
+
+  b.barrio.buildingAABBs.push({minX:b.x-b.w/2-.4, maxX:b.x+b.w/2+.4, minZ:b.z-b.d/2-.4, maxZ:b.z+b.d/2+.4, building:b});
+  b.barrio.buildingMeshes.push(bMesh);
+}
+
+function makeBuildingSign(text, color){
+  const c = document.createElement('canvas');
+  c.width=256; c.height=64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle='rgba(10,10,14,.9)'; ctx.fillRect(0,0,256,64);
+  ctx.strokeStyle='#'+new THREE.Color(color).getHexString(); ctx.lineWidth=4; ctx.strokeRect(4,4,248,56);
+  ctx.fillStyle='#f2ecd8'; ctx.font='bold 26px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.6,.65), new THREE.MeshBasicMaterial({map:tex, transparent:true}));
+  return mesh;
+}
+
+/* The family emblem plaque mounted on a building's front once conquered. */
+function addEmblem(b){
+  if(b.emblemMesh) return;
+  const c = document.createElement('canvas');
+  c.width=128; c.height=128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle='#0a0a0e'; ctx.beginPath(); ctx.arc(64,64,60,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#ffd700'; ctx.lineWidth=6; ctx.stroke();
+  ctx.fillStyle='#ffd700'; ctx.font='bold 54px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('FG', 64, 68);
+  const tex = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(new THREE.CircleGeometry(.6,20), new THREE.MeshBasicMaterial({map:tex, transparent:true}));
+  mesh.position.set(b.x, b.h*0.6, b.z+b.d/2+0.09);
+  b.barrio.detailGroup.add(mesh);
+  b.emblemMesh = mesh;
+}
+
+/* ============================================================
+   BUILDING INTERIORS — explorable rooms, furniture, stairs, defenders
+   ============================================================
+   Only one interior exists in memory at a time (see G.interior), built at a
+   fixed location far from the city (INTERIOR_ORIGIN) the moment the player
+   walks through a building's door, and fully disposed the moment they walk
+   back out — "cargar interiores solo al entrar, descargar al salir".
+   Layout is a straightforward, robust strip plan: each floor is split into
+   `roomsPerFloor` rooms side-by-side along the building's X axis, connected
+   by doorway gaps in the partition walls; room 0 always holds the staircase
+   up (when there's more than one floor) and the entrance door on floor 0. */
+
+// Splits a w×d footprint into `n` side-by-side rooms along X (local coords,
+// centered on the building). Kept deliberately simple (no arbitrary room
+// shapes) so wall/collision generation stays a single, robust code path.
+function computeRoomLayout(w,d,n){
+  const innerW = w-WALL_T*2, innerD = d-WALL_T*2;
+  const stripW = innerW/n;
+  const rooms = [];
+  for(let i=0;i<n;i++){
+    const x0=-innerW/2+i*stripW, x1=x0+stripW;
+    rooms.push({x0,x1,z0:-innerD/2,z1:innerD/2});
+  }
+  return rooms;
+}
+
+// Wall segment helpers — both operate in the interior group's LOCAL space
+// (so mesh placement is simple) but register AABBs in WORLD space (offset
+// by INTERIOR_ORIGIN), matching what resolveBuildingCollision expects.
+// A `gapOpts` of {gapCenter,gapWidth} splits the wall into two segments
+// flanking a walkable doorway instead of one solid span.
+function addWallAlongZ(cxLocal, z0Local, z1Local, y, h, mat, gapOpts){
+  const st = G.interior;
+  const segs = [];
+  if(gapOpts){
+    const g0=gapOpts.gapCenter-gapOpts.gapWidth/2, g1=gapOpts.gapCenter+gapOpts.gapWidth/2;
+    if(g0>z0Local+0.15) segs.push([z0Local,g0]);
+    if(g1<z1Local-0.15) segs.push([g1,z1Local]);
+  } else segs.push([z0Local,z1Local]);
+  segs.forEach(([a,b])=>{
+    if(b-a<=0.05) return;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(WALL_T,h,b-a), mat);
+    mesh.position.set(cxLocal, y+h/2, (a+b)/2);
+    mesh.castShadow=true; mesh.receiveShadow=true;
+    st.group.add(mesh); st.wallMeshes.push(mesh);
+    st.wallAABBs.push({minX:INTERIOR_ORIGIN.x+cxLocal-WALL_T/2-.3, maxX:INTERIOR_ORIGIN.x+cxLocal+WALL_T/2+.3,
+                        minZ:INTERIOR_ORIGIN.z+a-.3, maxZ:INTERIOR_ORIGIN.z+b+.3});
+  });
+}
+function addWallAlongX(x0Local, x1Local, czLocal, y, h, mat, gapOpts){
+  const st = G.interior;
+  const segs = [];
+  if(gapOpts){
+    const g0=gapOpts.gapCenter-gapOpts.gapWidth/2, g1=gapOpts.gapCenter+gapOpts.gapWidth/2;
+    if(g0>x0Local+0.15) segs.push([x0Local,g0]);
+    if(g1<x1Local-0.15) segs.push([g1,x1Local]);
+  } else segs.push([x0Local,x1Local]);
+  segs.forEach(([a,b])=>{
+    if(b-a<=0.05) return;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(b-a,h,WALL_T), mat);
+    mesh.position.set((a+b)/2, y+h/2, czLocal);
+    mesh.castShadow=true; mesh.receiveShadow=true;
+    st.group.add(mesh); st.wallMeshes.push(mesh);
+    st.wallAABBs.push({minX:INTERIOR_ORIGIN.x+a-.3, maxX:INTERIOR_ORIGIN.x+b+.3,
+                        minZ:INTERIOR_ORIGIN.z+czLocal-WALL_T/2-.3, maxZ:INTERIOR_ORIGIN.z+czLocal+WALL_T/2+.3});
+  });
+}
+
+/* Builds every room/wall/stair/furniture/light for `building` into the
+   shared interior stage. Deterministic (seeded on building.id) so the same
+   building always looks the same, even though it's torn down and rebuilt
+   fresh on every single visit. */
+function buildInterior(building){
+  disposeInteriorContents();
+  const st = G.interior;
+  st.building = building;
+
+  const type = BUILDING_TYPES[building.type];
+  const furnKeys = FURNITURE_SETS[type.furn];
+  const rand = makeSeededRandom(hashString(building.id));
+  const w=building.w, d=building.d, floors=building.floors;
+  const roomsPerFloor = BUILDING_ARCHETYPES[type.archetype].roomsPerFloor;
+  const rooms = computeRoomLayout(w,d,roomsPerFloor);
+  const STAIR_ROOM = 0;
+  const DOOR_GAP = 2.3;
+
+  const wallMat = new THREE.MeshStandardMaterial({color:shadeColor(type.color,-0.6), roughness:.9});
+  const floorMat = new THREE.MeshStandardMaterial({color:0x332e26, roughness:.95});
+  const winMat = new THREE.MeshStandardMaterial({color:0x9fd6ff, emissive:0x2a4a5a, emissiveIntensity:.4, transparent:true, opacity:.55});
+  const stairMat = new THREE.MeshStandardMaterial({color:0x2a2a2e, roughness:.7});
+
+  building.roomSpawns = [];
+
+  // ground slab (the literal bottom — always full, nothing below it)
+  rooms.forEach(r=>{
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(r.x1-r.x0, WALL_T, r.z1-r.z0), floorMat);
+    slab.position.set((r.x0+r.x1)/2, -WALL_T/2, 0);
+    slab.receiveShadow=true;
+    st.group.add(slab);
+  });
+
+  for(let f=0; f<floors; f++){
+    const fy = f*FLOOR_H;
+
+    // exterior perimeter (door gap on the south wall of the ground floor only)
+    addWallAlongZ(-w/2, -d/2, d/2, fy, FLOOR_H, wallMat);
+    addWallAlongZ( w/2, -d/2, d/2, fy, FLOOR_H, wallMat);
+    addWallAlongX(-w/2, w/2, -d/2, fy, FLOOR_H, wallMat);
+    addWallAlongX(-w/2, w/2,  d/2, fy, FLOOR_H, wallMat, f===0?{gapCenter:0, gapWidth:DOOR_GAP}:null);
+
+    // a window pane on the back wall, just for visual variety
+    if(w>3.5){
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(2.4,w*0.3),1.1), winMat);
+      win.position.set(0, fy+2.3, -d/2+0.03); win.rotation.y=Math.PI;
+      st.group.add(win);
+    }
+
+    // partitions between rooms, each with its own doorway
+    for(let i=1;i<rooms.length;i++){
+      const r = rooms[i];
+      addWallAlongZ(r.x0, r.z0, r.z1, fy, FLOOR_H, wallMat, {gapCenter:0, gapWidth:DOOR_GAP});
+    }
+
+    // ceiling / next floor's slab — left open over the stair room so the
+    // staircase actually leads somewhere
+    rooms.forEach((r,ri)=>{
+      if(f<floors-1 && ri===STAIR_ROOM) return;
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(r.x1-r.x0, WALL_T, r.z1-r.z0), floorMat);
+      slab.position.set((r.x0+r.x1)/2, fy+FLOOR_H+WALL_T/2, 0);
+      slab.receiveShadow=true; slab.castShadow=true;
+      st.group.add(slab);
+    });
+
+    // staircase up, inside the stair room. The visible steps are purely
+    // cosmetic; walking is handled by a single invisible "ramp" region (see
+    // applyStairRamp in updatePlayer) that smoothly interpolates the
+    // player's height across it — far more robust than colliding with each
+    // individual step block.
+    if(f<floors-1){
+      const r = rooms[STAIR_ROOM];
+      const steps=10, runLen=(r.x1-r.x0)*0.7, stepW=runLen/steps;
+      for(let s=0;s<steps;s++){
+        const cx = r.x0+0.6+(s+0.5)*stepW, cy = fy+(s+1)*(FLOOR_H/steps);
+        const step = new THREE.Mesh(new THREE.BoxGeometry(stepW+0.05,WALL_T,1.4), stairMat);
+        step.position.set(cx,cy,0);
+        step.castShadow=true; step.receiveShadow=true;
+        st.group.add(step);
+      }
+      const rampX0 = INTERIOR_ORIGIN.x+r.x0+0.6, rampX1 = rampX0+runLen;
+      st.stairs.push({minX:rampX0, maxX:rampX1, minZ:INTERIOR_ORIGIN.z-0.7, maxZ:INTERIOR_ORIGIN.z+0.7, y0:fy, y1:fy+FLOOR_H});
+    }
+
+    // furniture + a ceiling light per room
+    rooms.forEach(r=>{
+      const roomW=r.x1-r.x0, roomD=r.z1-r.z0;
+      const furnCount = 1+Math.floor(rand()*2);
+      for(let k=0;k<furnCount;k++){
+        const key = furnKeys[Math.floor(rand()*furnKeys.length)];
+        const build = FURNITURE_BUILDERS[key];
+        if(!build || roomW<2.6 || roomD<2.6) continue;
+        const item = build();
+        item.position.set(r.x0+1.3+rand()*(roomW-2.6), fy, r.z0+1.3+rand()*(roomD-2.6));
+        item.rotation.y = rand()*Math.PI*2;
+        st.group.add(item);
+      }
+      const lamp = makeCeilingLamp();
+      lamp.position.set((r.x0+r.x1)/2, fy+FLOOR_H-0.3, (r.z0+r.z1)/2);
+      st.group.add(lamp);
+      const light = new THREE.PointLight(0xffe9c0, 0.9, roomW+roomD+4, 2);
+      light.position.set((r.x0+r.x1)/2, fy+FLOOR_H-0.6, (r.z0+r.z1)/2);
+      st.group.add(light);
+
+      building.roomSpawns.push({
+        x:INTERIOR_ORIGIN.x+(r.x0+r.x1)/2, y:fy, z:INTERIOR_ORIGIN.z+(r.z0+r.z1)/2,
+        roomRadius: Math.max(2.5, Math.min(roomW,roomD)/2-0.8),
+        roomBounds:{minX:INTERIOR_ORIGIN.x+r.x0+0.5,maxX:INTERIOR_ORIGIN.x+r.x1-0.5,minZ:INTERIOR_ORIGIN.z+r.z0+0.5,maxZ:INTERIOR_ORIGIN.z+r.z1-0.5},
+      });
+    });
+  }
+
+  // roof cap — always full, nothing above the top floor
+  const topY = floors*FLOOR_H;
+  rooms.forEach(r=>{
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(r.x1-r.x0, WALL_T, r.z1-r.z0), floorMat);
+    slab.position.set((r.x0+r.x1)/2, topY+WALL_T/2, 0);
+    st.group.add(slab);
+  });
+
+  st.exitTrigger = {x:INTERIOR_ORIGIN.x, z:INTERIOR_ORIGIN.z+d/2-1.3};
+  st.spawnLocal = {x:INTERIOR_ORIGIN.x, z:INTERIOR_ORIGIN.z+d/2-2.4};
+}
+
+/* Disposes whatever's currently in the interior stage (geometry + materials,
+   not just scene removal) and clears out any of its enemies from the shared
+   G.enemies list. Safe to call even when nothing is loaded. */
+function disposeInteriorContents(){
+  const st = G.interior;
+  // Enemy meshes live directly in G.scene (not st.group — see createEnemy),
+  // same as outdoor enemies, so they need removing explicitly.
+  st.enemies.forEach(en=>{
+    G.scene.remove(en.group);
+    const idx = G.enemies.indexOf(en);
+    if(idx>=0) G.enemies.splice(idx,1);
+  });
+  st.enemies.length = 0;
+  st.group.traverse(obj=>{
+    if(obj.geometry) obj.geometry.dispose();
+    if(obj.material){
+      if(Array.isArray(obj.material)) obj.material.forEach(m=>m.dispose());
+      else obj.material.dispose();
+    }
+  });
+  while(st.group.children.length) st.group.remove(st.group.children[0]);
+  st.wallAABBs.length = 0;
+  st.wallMeshes.length = 0;
+  st.stairs.length = 0;
+}
+
+/* Spawns this building's remaining defenders (skipped entirely once it's
+   owned — a conquered building stays safe to revisit). Each gets assigned to
+   one of the building's rooms ("defend distinct rooms") using a seed that's
+   stable across visits, so partial progress (some already killed on an
+   earlier visit) always leaves the SAME ones behind rather than reshuffling. */
+function spawnInteriorEnemies(building){
+  if(building.owned || building.enemiesRemaining<=0) return;
+  const barrio = building.barrio;
+  const spawns = building.roomSpawns.slice();
+  const rand = makeSeededRandom(hashString(building.id+'_e'));
+  for(let i=spawns.length-1;i>0;i--){ const j=Math.floor(rand()*(i+1)); const t=spawns[i]; spawns[i]=spawns[j]; spawns[j]=t; }
+  // Districts get progressively tougher toward Barrio Central, same flavor
+  // as outdoor thugs but a bit gentler since indoor fights are close-range.
+  const diffScale = 1 + (barrio.boss==='final'?0.5:barrio.boss==='mini'?0.22:0);
+  for(let i=0;i<building.enemiesRemaining;i++){
+    const spot = spawns[i%spawns.length];
+    const en = createEnemy(barrio, spot.x, spot.z, {
+      kind:'thug', color:shadeColor(barrio.color,0.1), hp:Math.round(50*diffScale), dmg:Math.round(9*diffScale),
+      speed:3.6, detect:13, attackRange:9, cooldown:1.15,
+      moneyMin:8, moneyMax:18, powerReward:2, scale:1,
+      indoor:true, building, roomBounds:spot.roomBounds, roomRadius:spot.roomRadius,
+    });
+    en.group.position.y = spot.y; // stand at this room's floor height, not ground level
+    G.interior.enemies.push(en);
+  }
+}
+
+/* ---------- enter / exit ---------- */
+function enterBuilding(building){
+  const pl = G.player;
+  G.vehicle.mounted = false;
+  G.interior.outdoorReturnPos = {x:pl.group.position.x, z:pl.group.position.z};
+  buildInterior(building);
+  pl.group.position.set(G.interior.spawnLocal.x, 0, G.interior.spawnLocal.z);
+  pl.interiorFloorY = 0;
+  pl.velY=0; pl.grounded=true;
+  G.camYaw = G.camYawTarget = Math.PI; // face inward, away from the door
+  G.interior.active = true;
+  spawnInteriorEnemies(building);
+  showBanner('🚪 '+BUILDING_TYPES[building.type].name.toUpperCase()+(building.owned?' (bajo tu control)':''));
+}
+function exitInterior(){
+  const pl = G.player;
+  const ret = G.interior.outdoorReturnPos;
+  disposeInteriorContents();
+  G.interior.active = false;
+  G.interior.building = null;
+  if(ret) pl.group.position.set(ret.x, 0, ret.z);
+  pl.velY=0; pl.grounded=true;
+}
+
+/* Finds the closest building door the player can walk up to and press E on
+   (only considers buildings whose district is currently streamed in, which
+   is exactly the set the player could plausibly be standing next to). */
+function findNearbyBuildingDoor(){
+  const pp = G.player.group.position;
+  let nearest=null, nearestD=3;
+  G.barrios.forEach(b=>{
+    if(!b.detailBuilt || !b.buildings) return;
+    b.buildings.forEach(bld=>{
+      const dist = Math.hypot(pp.x-bld.doorTrigger.x, pp.z-bld.doorTrigger.z);
+      if(dist<nearestD){ nearestD=dist; nearest=bld; }
+    });
+  });
+  return nearest;
 }
 
 /* Tears down a district's streamed detail (disposing geometry/materials so
@@ -1162,6 +1763,11 @@ function unbuildBarrioDetail(barrio){
   while(barrio.detailGroup.children.length) barrio.detailGroup.remove(barrio.detailGroup.children[0]);
   barrio.buildingAABBs.length = 0;
   barrio.buildingMeshes.length = 0;
+  // Building OWNERSHIP/PROGRESS (barrio.buildings) is never cleared here —
+  // only the mesh references, since those specific mesh instances were just
+  // disposed above and get recreated fresh next time this district streams
+  // back in (see instantiateBuildingMesh).
+  if(barrio.buildings) barrio.buildings.forEach(b=>{ b.mesh=null; b.roofMesh=null; b.doorMesh=null; b.signMesh=null; b.emblemMesh=null; });
 }
 
 // G.buildingAABBs/buildingMeshes (used by player/camera/enemy collision) are
@@ -1328,21 +1934,39 @@ function updateMonorail(dt){
   });
 }
 
-/* ---------- E-to-interact: mount/dismount the bike, or open the fast-travel map near a station ---------- */
+/* ---------- E-to-interact: mount/dismount the bike, enter/exit buildings, or open the fast-travel map near a station ---------- */
 function updateInteractionHint(){
   const pl = G.player, veh = G.vehicle, pp = pl.group.position;
   const hint = document.getElementById('hint');
   const key = isTouchDevice ? 'Tocá 🅴' : 'Presioná E';
+  G.nearTransitPoint = null;
+  G.nearBuildingDoor = null;
+  if(G.interior.active){
+    const et = G.interior.exitTrigger;
+    if(et && Math.hypot(pp.x-et.x, pp.z-et.z) < 3){
+      hint.textContent = key+' para salir';
+      hint.classList.add('show');
+    } else {
+      hint.classList.remove('show');
+    }
+    return;
+  }
   if(veh.mounted){
     hint.textContent = key+' para bajar de la moto';
     hint.classList.add('show');
-    G.nearTransitPoint = null;
     return;
   }
   if(Math.hypot(pp.x-veh.group.position.x, pp.z-veh.group.position.z) < 3){
     hint.textContent = key+' para subir a la moto 🏍️';
     hint.classList.add('show');
-    G.nearTransitPoint = null;
+    return;
+  }
+  const door = findNearbyBuildingDoor();
+  if(door){
+    G.nearBuildingDoor = door;
+    const info = BUILDING_TYPES[door.type];
+    hint.textContent = key+' para entrar: '+info.name+(door.owned?' ✔':'');
+    hint.classList.add('show');
     return;
   }
   let nearest=null, nearestD=3.2;
@@ -1362,6 +1986,11 @@ function updateInteractionHint(){
 function tryInteract(){
   if(!G.playing || G.menuState!=='none') return;
   const pl=G.player, veh=G.vehicle, pp=pl.group.position;
+  if(G.interior.active){
+    const et = G.interior.exitTrigger;
+    if(et && Math.hypot(pp.x-et.x, pp.z-et.z) < 3) exitInterior();
+    return;
+  }
   if(veh.mounted){
     veh.mounted = false;
     veh.group.position.set(pp.x+Math.sin(G.camYaw)*1.6, 0, pp.z+Math.cos(G.camYaw)*1.6);
@@ -1371,6 +2000,7 @@ function tryInteract(){
     veh.mounted = true;
     return;
   }
+  if(G.nearBuildingDoor){ enterBuilding(G.nearBuildingDoor); return; }
   if(G.nearTransitPoint) openCityMap();
 }
 
@@ -1688,11 +2318,12 @@ function updateFollowCamera(){
   const lookTarget = _camLookTarget.set(p.x, p.y+1.35, p.z);
   const toCam = _camToCam.set(camX,camY,camZ).sub(lookTarget);
   const fullDist = toCam.length();
-  if(fullDist > 0.001 && G.buildingMeshes.length){
+  const collisionMeshes = G.interior.active ? G.interior.wallMeshes : G.buildingMeshes;
+  if(fullDist > 0.001 && collisionMeshes.length){
     toCam.normalize();
     cameraCollisionRay.set(lookTarget, toCam);
     cameraCollisionRay.far = fullDist;
-    const hits = cameraCollisionRay.intersectObjects(G.buildingMeshes, false);
+    const hits = cameraCollisionRay.intersectObjects(collisionMeshes, false);
     if(hits.length){
       const safeDist = Math.max(CAMERA_CONFIG.minDistance, hits[0].distance - 0.35);
       camX = lookTarget.x + toCam.x*safeDist;
@@ -1716,8 +2347,11 @@ function updateFollowCamera(){
 }
 
 function resolveBuildingCollision(x,z,radius){
-  for(let i=0;i<G.buildingAABBs.length;i++){
-    const b=G.buildingAABBs[i];
+  // Swap collision source depending on whether the player is out in the city
+  // or inside a building — see G.interior.
+  const list = G.interior.active ? G.interior.wallAABBs : G.buildingAABBs;
+  for(let i=0;i<list.length;i++){
+    const b=list[i];
     if(x>b.minX-radius && x<b.maxX+radius && z>b.minZ-radius && z<b.maxZ+radius){
       const overlapL = (x)-(b.minX-radius);
       const overlapR = (b.maxX+radius)-(x);
@@ -1751,15 +2385,46 @@ function updatePlayer(dt){
   let nz = pl.group.position.z + mz*speed*dt;
   const resolved = resolveBuildingCollision(nx,nz,.5);
   nx=resolved.x; nz=resolved.z;
-  nx = Math.max(-MAP_HALF+10, Math.min(MAP_HALF-10, nx));
-  nz = Math.max(-MAP_HALF+10, Math.min(MAP_HALF-10, nz));
+  if(!G.interior.active){
+    // The whole outdoor-city clamp is meaningless (and actively harmful —
+    // it would trap the player at the boundary) way out at INTERIOR_ORIGIN.
+    nx = Math.max(-MAP_HALF+10, Math.min(MAP_HALF-10, nx));
+    nz = Math.max(-MAP_HALF+10, Math.min(MAP_HALF-10, nz));
+  }
   pl.group.position.x = nx;
   pl.group.position.z = nz;
 
-  // gravity / jump
+  // gravity / jump — floorY is the height of whatever ground/floor slab the
+  // player is currently standing on: 0 outdoors, or the current interior
+  // floor level (changed by walking across a staircase — see below).
+  const floorY = G.interior.active ? pl.interiorFloorY : 0;
   pl.velY += -28*dt;
   pl.group.position.y += pl.velY*dt;
-  if(pl.group.position.y<=0){ pl.group.position.y=0; pl.velY=0; pl.grounded=true; }
+  if(pl.group.position.y<=floorY){ pl.group.position.y=floorY; pl.velY=0; pl.grounded=true; }
+
+  // Stairs: while standing within a staircase's footprint, height is
+  // interpolated across it directly instead of relying on gravity/collision
+  // (much simpler and more robust than physically stepping onto each stair).
+  if(G.interior.active){
+    // X is checked with a margin beyond [minX,maxX]: at normal run speed a
+    // single frame can carry the player from just-shy-of-the-top straight
+    // past maxX, and without the margin that frame's containment check would
+    // fail outright — skipping the t>=0.985 "arrived upstairs" moment
+    // entirely and dropping them back through the stairwell. t itself stays
+    // clamped to [0,1] regardless, so overshoot never overshoots the floor height.
+    const STAIR_MARGIN = 1.2;
+    for(let i=0;i<G.interior.stairs.length;i++){
+      const s = G.interior.stairs[i];
+      if(nx>=s.minX-STAIR_MARGIN && nx<=s.maxX+STAIR_MARGIN && nz>=s.minZ && nz<=s.maxZ){
+        const t = Math.max(0,Math.min(1,(nx-s.minX)/(s.maxX-s.minX)));
+        const y = s.y0 + t*(s.y1-s.y0);
+        pl.group.position.y = y;
+        pl.velY = 0; pl.grounded = true;
+        pl.interiorFloorY = (t>=0.985) ? s.y1 : s.y0;
+        break;
+      }
+    }
+  }
 
   pl.group.rotation.y = yaw;
 
@@ -1870,9 +2535,36 @@ function killEnemy(en){
   sfxMoney();
   spawnDamagePopup(en.group.position.clone().add(new THREE.Vector3(0,2.2,0)), '+$'+money, '#ffd700');
 
+  if(en.indoor && en.building){
+    const iidx = G.interior.enemies.indexOf(en); if(iidx>=0) G.interior.enemies.splice(iidx,1);
+    en.building.enemiesRemaining = Math.max(0, en.building.enemiesRemaining-1);
+    if(en.building.enemiesRemaining<=0 && !en.building.owned){
+      conquerBuilding(en.building);
+    }
+    return; // indoor kills feed building conquest, not the outdoor barrio.enemyList/boss flow
+  }
+
   if(en.barrio.enemyList.length===0 && !en.barrio.owned){
     dominateBarrio(en.barrio);
   }
+}
+
+/* Clearing every defender inside a building conquers it permanently: it
+   turns gold, gets the family emblem, and starts earning money every
+   second from then on (see updateBuildingIncome). */
+function conquerBuilding(building){
+  building.owned = true;
+  const type = BUILDING_TYPES[building.type];
+  if(building.mesh) building.mesh.material.color.set(0xffd700);
+  if(building.signMesh) building.barrio.detailGroup.remove(building.signMesh);
+  addEmblem(building);
+  const bonus = Math.round(type.income*15);
+  G.player.money += bonus;
+  G.player.power += 8;
+  G.player.buildingsOwned = (G.player.buildingsOwned||0)+1;
+  sfxDomination();
+  showBanner('🏢 ¡CONQUISTADO! '+type.name.toUpperCase()+' — +$'+bonus);
+  updateDistrictControl(building.barrio);
 }
 
 function dominateBarrio(barrio){
@@ -1888,6 +2580,59 @@ function dominateBarrio(barrio){
 
   const allDone = G.barrios.every(b=>b.owned);
   if(allDone){ setTimeout(triggerVictory, 1200); }
+}
+
+/* District control: recomputed after every building conquest. Once the
+   share of owned buildings in a barrio hits CONTROL_PCT, the district flips
+   into the same "owned" state the boss-defeat flow uses (recolor, cash
+   bonus, city-domination check) — conquest-by-buildings and conquest-by-boss
+   are just two roads into dominateBarrio(). On top of that it eases up the
+   remaining defenders ("menos enemigos") and puts a couple of allied
+   patrols on the street ("aliados patrullando"). */
+const CONTROL_PCT = 0.8;
+function updateDistrictControl(barrio){
+  if(!barrio.buildings || !barrio.buildings.length) return;
+  const owned = barrio.buildings.filter(b=>b.owned).length;
+  barrio.buildingControlPct = owned/barrio.buildings.length;
+  if(barrio.buildingControlPct>=CONTROL_PCT && !barrio.controlled){
+    barrio.controlled = true;
+    barrio.buildings.forEach(b=>{ if(!b.owned) b.enemiesRemaining = Math.max(1, Math.ceil(b.enemiesRemaining*0.5)); });
+    spawnAllyPatrol(barrio);
+    showBanner('👑 '+barrio.name.toUpperCase()+' BAJO CONTROL DE LA FAMILIA GLORIOSO');
+    if(!barrio.owned) dominateBarrio(barrio);
+  }
+}
+
+/* A couple of cosmetic, non-hostile allied NPCs that wander a controlled
+   district's plaza — visual proof the family runs the block now. They carry
+   no combat logic (no detect/attack/hp), just a slow wander loop, so they
+   stay cheap and never interact with the enemy/projectile/collision code. */
+function spawnAllyPatrol(barrio){
+  for(let i=0;i<2;i++){
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(.4,.9,4,8), new THREE.MeshStandardMaterial({color:0xffd700, roughness:.6}));
+    body.position.y=1.0; body.castShadow=true; group.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(.26,10,10), new THREE.MeshStandardMaterial({color:0xE0A878}));
+    head.position.y=1.7; group.add(head);
+    const ang = Math.random()*Math.PI*2, rad = Math.random()*barrio.size*0.25;
+    group.position.set(barrio.x+Math.cos(ang)*rad, 0, barrio.z+Math.sin(ang)*rad);
+    G.scene.add(group);
+    G.allies.push({ group, center:{x:barrio.x,z:barrio.z}, radius:barrio.size*0.3, waypoint:{x:group.position.x,z:group.position.z}, speed:1.6 });
+  }
+}
+function updateAllies(dt){
+  G.allies.forEach(a=>{
+    const dx=a.waypoint.x-a.group.position.x, dz=a.waypoint.z-a.group.position.z;
+    const d=Math.hypot(dx,dz);
+    if(d<1){
+      const ang=Math.random()*Math.PI*2, rad=Math.random()*a.radius;
+      a.waypoint={x:a.center.x+Math.cos(ang)*rad, z:a.center.z+Math.sin(ang)*rad};
+    } else {
+      a.group.position.x += dx/d*a.speed*dt;
+      a.group.position.z += dz/d*a.speed*dt;
+      a.group.rotation.y = Math.atan2(dx,dz);
+    }
+  });
 }
 
 function damagePlayer(dmg){
@@ -1907,10 +2652,20 @@ function updateEnemies(dt){
     if(!en.alive) return;
     const ex=en.group.position.x, ez=en.group.position.z;
     const dx=pp.x-ex, dz=pp.z-ez;
-    const dist = Math.hypot(dx,dz);
+    const horizDist = Math.hypot(dx,dz);
+    // Indoor enemies also factor in floor height (a mook one floor up
+    // shouldn't "see" the player straight through the ceiling); outdoor
+    // enemies are unaffected (always ground-level, horizontal is enough).
+    const dist = en.indoor ? Math.hypot(dx,dz,pp.y-en.group.position.y) : horizDist;
 
     if(en.state==='idle'){
-      if(dist<en.detect){ en.state='combat'; }
+      if(dist<en.detect){
+        en.state='combat';
+        // "Cooperate / defend the building": the first defender to spot the
+        // player alerts every other still-idle defender in the same
+        // building at once, instead of each fighting alone.
+        if(en.indoor) G.interior.enemies.forEach(o=>{ if(o!==en && o.alive && o.state==='idle') o.state='combat'; });
+      }
       else{
         const wdx = en.waypoint.x-ex, wdz = en.waypoint.z-ez;
         if(Math.hypot(wdx,wdz)<1){
@@ -1924,8 +2679,8 @@ function updateEnemies(dt){
       }
     } else if(en.state==='combat'){
       faceDirection(en.group, dx, dz);
-      if(dist>en.attackRange*0.82){
-        moveEnemy(en, dx/dist*en.speed*dt, dz/dist*en.speed*dt);
+      if(horizDist>en.attackRange*0.82){
+        moveEnemy(en, dx/horizDist*en.speed*dt, dz/horizDist*en.speed*dt);
       }
       en.cooldown -= dt;
       if(dist<=en.attackRange && en.cooldown<=0){
@@ -1984,8 +2739,12 @@ function updateProjectiles(dt){
       remove=true;
     }
     if(pr.life<=0) remove=true;
-    for(let b=0;b<G.buildingAABBs.length && !remove;b++){
-      const bb=G.buildingAABBs[b];
+    // Same indoor/outdoor collision-source swap as resolveBuildingCollision:
+    // indoors, enemy shots need to be blocked by interior walls, not by
+    // whatever outdoor building AABBs happen to still be loaded.
+    const wallList = G.interior.active ? G.interior.wallAABBs : G.buildingAABBs;
+    for(let b=0;b<wallList.length && !remove;b++){
+      const bb=wallList[b];
       if(pr.mesh.position.x>bb.minX && pr.mesh.position.x<bb.maxX && pr.mesh.position.z>bb.minZ && pr.mesh.position.z<bb.maxZ){ remove=true; }
     }
     if(remove){ G.scene.remove(pr.mesh); G.projectiles.splice(i,1); }
@@ -2016,14 +2775,23 @@ function updatePopups(dt){
 }
 
 /* ---------- passive income ---------- */
+// Ticks every second, summing BUILDING_TYPES[type].income for every owned
+// building across every barrio (loaded or not — ownership is persistent
+// state on barrio.buildings, independent of whether that district's detail
+// is currently streamed in), plus the flat per-barrio bonus from the older
+// boss-defeat domination flow. G.player.incomePerSec is cached for the HUD.
 let incomeAccum=0;
 function updateEconomy(dt){
   incomeAccum += dt;
   if(incomeAccum>=1){
     incomeAccum-=1;
     let inc=0;
-    G.barrios.forEach(b=>{ if(b.owned && !b.home) inc+=2; });
+    G.barrios.forEach(b=>{
+      if(b.owned && !b.home) inc+=2;
+      if(b.buildings) b.buildings.forEach(bld=>{ if(bld.owned) inc += BUILDING_TYPES[bld.type].income; });
+    });
     if(inc>0) G.player.money += inc;
+    G.player.incomePerSec = inc;
   }
 }
 
@@ -2050,6 +2818,8 @@ function updateHUD(){
   document.getElementById('hpFill').style.width = Math.max(0,pl.hp/pl.maxHp*100)+'%';
   document.getElementById('hpText').textContent = Math.ceil(pl.hp)+'/'+pl.maxHp;
   document.getElementById('moneyText').textContent = '$'+pl.money;
+  document.getElementById('incomeText').textContent = '+$'+Math.round((pl.incomePerSec||0)*60)+'/min';
+  document.getElementById('buildingsText').textContent = (pl.buildingsOwned||0)+' edificios';
   const rank = rankFor(pl.power);
   document.getElementById('rankText').textContent = rank.name;
   const nextIdx = RANKS.indexOf(rank)+1;
@@ -2070,7 +2840,8 @@ function updateHUD(){
   let list = '';
   G.barrios.forEach(b=>{
     if(b.home) return;
-    list += '<div class="bl-row '+(b.owned?'done':'')+'"><span><span class="dot" style="background:#'+(b.owned?'ffd700':new THREE.Color(b.color).getHexString())+'"></span>'+b.name+'</span><span>'+(b.owned?'✔':b.enemyList.length)+'</span></div>';
+    const pct = b.buildings ? Math.round((b.buildings.filter(x=>x.owned).length/b.buildings.length)*100) : 0;
+    list += '<div class="bl-row '+(b.owned?'done':'')+'"><span><span class="dot" style="background:#'+(b.owned?'ffd700':new THREE.Color(b.color).getHexString())+'"></span>'+b.name+'</span><span>'+(b.owned?'✔':pct+'% · '+b.enemyList.length)+'</span></div>';
   });
   document.getElementById('barrioList').innerHTML = list;
 }
@@ -2296,22 +3067,38 @@ function resetGame(){
   G.popups.forEach(p=>p.el.remove());
   G.popups.length=0;
 
+  // Leave any building interior before wiping state, and drop the ally patrols.
+  if(G.interior.active){ disposeInteriorContents(); G.interior.active=false; G.interior.building=null; }
+  G.allies.forEach(a=>G.scene.remove(a.group));
+  G.allies.length=0;
+
   G.barrios.forEach(b=>{
     b.enemyList.length=0;
     if(!b.home){
       b.owned=false;
       b.discovered=false;
+      b.controlled=false;
+      b.buildingControlPct=0;
       b.zoneMesh.material.color.set(b.color);
       b.flagMesh.material.color.set(b.color);
       spawnBarrioEnemies(b);
     }
+    if(b.buildings){
+      b.buildings.forEach(bld=>{
+        bld.owned=false;
+        bld.enemiesRemaining = bld.enemyCountTotal;
+      });
+      if(b.detailBuilt){ unbuildBarrioDetail(b); buildBarrioDetail(b); }
+    }
   });
+  refreshGlobalBuildingLists();
 
   const pl=G.player;
   pl.hp=100; pl.maxHp=100; pl.dmgMult=1; pl.money=120; pl.power=0;
   pl._hpLevel=0; pl._dmgLevel=0;
   pl.weapons = JSON.parse(JSON.stringify(WEAPONS));
   pl.weapon='pistola'; pl.cooldown=0; pl.reloading=false; pl.dead=false;
+  pl.buildingsOwned=0; pl.incomePerSec=0; pl.interiorFloorY=0;
   pl.group.position.set(0,0,10);
   pl.velY=0; pl.grounded=true;
 
@@ -2348,6 +3135,7 @@ function animate(){
       updatePlayer(dt);
       updateVehicle();
       updateEnemies(dt);
+      updateAllies(dt);
       updateProjectiles(dt);
       updateEconomy(dt);
       updateWorldStreaming(dt);
