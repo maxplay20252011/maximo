@@ -160,6 +160,10 @@ body.touch-mode.portrait #portraitHint{display:flex;}
   background:rgba(0,0,0,.55);padding:6px 16px;border-radius:8px;opacity:0;transition:opacity .3s;text-align:center;}
 #hint.show{opacity:1;}
 
+#comboText{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%) scale(.85);color:#ffd700;font-size:1.5rem;
+  font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,.8);opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;letter-spacing:1px;}
+#comboText.show{opacity:1;transform:translate(-50%,-50%) scale(1);}
+
 #lockPrompt{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
   background:rgba(0,0,0,.55);color:#fff;font-size:1.4rem;font-weight:700;letter-spacing:1px;cursor:pointer;touch-action:manipulation;}
 
@@ -267,9 +271,10 @@ body.touch-mode.portrait #portraitHint{display:flex;}
   <div id="weaponPanel" class="hud-panel">
     <span id="weaponName">Pistola</span>
     <span id="ammoText"></span>
-    <button class="wkey" data-w="pistola" title="Pistola">1</button>
+    <button class="wkey" data-w="palo" title="Palo de Madera">1</button>
     <button class="wkey" data-w="bate" title="Bate">2</button>
-    <button class="wkey" data-w="escopeta" title="Escopeta">3</button>
+    <button class="wkey" data-w="pistola" title="Pistola">3</button>
+    <button class="wkey" data-w="escopeta" title="Escopeta">4</button>
     <button class="wkey" id="reloadBtn" title="Recargar">R</button>
     <button class="wkey" id="shopBtnTouch" title="Tienda">B · Tienda</button>
     <button class="wkey" id="mapBtnTouch" title="Mapa de la ciudad">🗺️ M · Mapa</button>
@@ -280,6 +285,7 @@ body.touch-mode.portrait #portraitHint{display:flex;}
   <div id="crosshair"><div id="crosshairDot"></div></div>
   <div id="banner"></div>
   <div id="hint"></div>
+  <div id="comboText"></div>
 </div>
 
 <!-- Touch controls (shown only on touch devices) -->
@@ -421,12 +427,15 @@ const BARRIO_DEFS = [
   {id:'central', name:'Barrio Central',  x:0,    z:-700, size:155, color:0xe63946, home:false, owned:false, thugs:6, boss:'final', layout:'financiero',     transit:['metro','bus']}
 ];
 
+// 1. "Fran Glorioso comienza con un palo de madera" — palo is the only
+// weapon owned from the start; everything else is a shop purchase.
 const WEAPONS = {
-  pistola: {key:'pistola', name:'Pistola', type:'ranged', dmg:14, cooldown:.30, mag:12, magSize:12, reserve:48, reloadTime:1.0, spread:.012, range:80, pellets:1, owned:true},
-  bate:    {key:'bate',    name:'Bate',    type:'melee',  dmg:28, cooldown:.5,  range:3.3, angle:Math.PI/2.1, owned:true},
+  palo:    {key:'palo',    name:'Palo de Madera', type:'melee', dmg:16, cooldown:.55, range:3.0, angle:Math.PI/2.1, owned:true},
+  bate:    {key:'bate',    name:'Bate',    type:'melee',  dmg:28, cooldown:.5,  range:3.3, angle:Math.PI/2.1, owned:false, cost:180},
+  pistola: {key:'pistola', name:'Pistola', type:'ranged', dmg:14, cooldown:.30, mag:12, magSize:12, reserve:48, reloadTime:1.0, spread:.012, range:80, pellets:1, owned:false, cost:280},
   escopeta:{key:'escopeta',name:'Escopeta',type:'ranged', dmg:10, cooldown:.8,  mag:6,  magSize:6,  reserve:0,  reloadTime:1.5, spread:.09, range:30, pellets:6, owned:false, cost:350}
 };
-const WEAPON_ORDER = ['pistola','bate','escopeta'];
+const WEAPON_ORDER = ['palo','bate','pistola','escopeta'];
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints>0 || navigator.msMaxTouchPoints>0;
 
 // requestPointerLock() can throw synchronously or return a Promise that rejects
@@ -512,7 +521,7 @@ const G = {
   camYaw:0, camPitch:.28, camYawTarget:0, camPitchTarget:.28, camDist:CAMERA_CONFIG.distance,
   dragLook:{active:false, lastX:0, lastY:0},
   input:{f:0,b:0,l:0,r:0,run:false,jump:false,mouseDown:false,jx:0,jy:0},
-  player:null, enemies:[], projectiles:[], buildingAABBs:[], buildingMeshes:[], allies:[],
+  player:null, enemies:[], projectiles:[], buildingAABBs:[], buildingMeshes:[], allies:[], friends:[],
   barrios:[], popups:[],
   startTime:0,
   orbitAngle:0,
@@ -523,6 +532,7 @@ const G = {
   transitPoints:[],
   nearTransitPoint:null,
   nearBuildingDoor:null,
+  nearRecruit:null,
   // Streaming: recomputed on a timer (not every frame) in updateWorldStreaming.
   streamTimer:0,
   // Rideable motorcycle — see createVehicle()/updateVehicle().
@@ -665,6 +675,10 @@ function initScene(){
     barrio.buildingMeshes = [];     // this barrio's own building meshes (camera-collision raycast)
     barrio.transitPoints = [];      // this barrio's metro/bus/taxi station world positions
     barrio.pedestrians = [];        // cosmetic wandering NPCs — see spawnPedestrians()/updatePedestrians()
+    barrio.friendAvailable = false; // a boss-lair defeat unlocks a recruitable companion — see offerRecruit()
+    barrio.friendRecruited = false;
+    barrio.recruitMesh = null;
+    barrio.recruitSpot = null;
     barrio.detailBuilt = false;
     barrio.detailGroup = new THREE.Group();
     G.scene.add(barrio.detailGroup);
@@ -753,29 +767,102 @@ function onResize(){
 }
 
 /* ---------- Player mesh ---------- */
+/* Red-and-black spiderweb-motif hoodie texture for Fran's torso — inspired
+   by, but not a copy of, any existing character: a simple radial web of
+   lines over a red field, entirely canvas-drawn like every other texture
+   in this game (no external image assets). */
+function makeSpiderwebTexture(){
+  const c = document.createElement('canvas');
+  c.width=256; c.height=256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle='#c81e2e'; ctx.fillRect(0,0,256,256);
+  ctx.strokeStyle='rgba(10,10,14,.85)'; ctx.lineWidth=3;
+  const cx=128, cy=128;
+  for(let i=0;i<10;i++){
+    const a=(i/10)*Math.PI*2;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(a)*220, cy+Math.sin(a)*220); ctx.stroke();
+  }
+  for(let r=28; r<220; r+=32){
+    ctx.beginPath();
+    for(let i=0;i<=10;i++){
+      const a=(i/10)*Math.PI*2;
+      const px=cx+Math.cos(a)*r, py=cy+Math.sin(a)*r;
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.stroke();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+/* Fran Glorioso, 12 años: messy dark-brown hair, red spiderweb-motif
+   hoodie, dark jeans, white-and-red sneakers, black fingerless gloves,
+   backpack. Same low-poly primitive kit as every enemy/NPC in the game. */
 function createPlayer(){
   const group = new THREE.Group();
-  const suitColor = 0x1c1c26;
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.42,.95,4,8), new THREE.MeshStandardMaterial({color:suitColor, roughness:.6}));
-  body.position.y=1.05; body.castShadow=true;
+
+  // Legs — dark blue jeans
+  const legs = new THREE.Mesh(new THREE.CylinderGeometry(.24,.28,.85,8), new THREE.MeshStandardMaterial({color:0x22335a, roughness:.75}));
+  legs.position.y=.5; legs.castShadow=true;
+  group.add(legs);
+
+  // Torso — red hoodie, spiderweb-motif texture, with a dark hood collar
+  const hoodieTex = makeSpiderwebTexture();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.4,.72,4,8), new THREE.MeshStandardMaterial({color:0xffffff, map:hoodieTex, roughness:.7}));
+  body.position.y=1.28; body.castShadow=true;
   group.add(body);
+  const hood = new THREE.Mesh(new THREE.TorusGeometry(.24,.09,8,14,Math.PI*1.3), new THREE.MeshStandardMaterial({color:0x8a1420, roughness:.8}));
+  hood.position.set(0,1.7,-.08); hood.rotation.set(Math.PI/2.3,0,Math.PI*0.35);
+  group.add(hood);
+
+  // Head — friendly-but-determined face (just skin tone; detail is in the hair/expression is implied)
   const head = new THREE.Mesh(new THREE.SphereGeometry(.27,12,12), new THREE.MeshStandardMaterial({color:0xE0A878, roughness:.8}));
-  head.position.y=1.78; head.castShadow=true;
+  head.position.y=1.95; head.castShadow=true;
   group.add(head);
-  // fedora
-  const hatBrim = new THREE.Mesh(new THREE.CylinderGeometry(.36,.36,.06,14), new THREE.MeshStandardMaterial({color:0x14141a}));
-  hatBrim.position.y=1.95;
-  group.add(hatBrim);
-  const hatTop = new THREE.Mesh(new THREE.CylinderGeometry(.22,.26,.24,14), new THREE.MeshStandardMaterial({color:0x14141a}));
-  hatTop.position.y=2.08;
-  group.add(hatTop);
-  const hatBand = new THREE.Mesh(new THREE.TorusGeometry(.235,.03,8,16), new THREE.MeshStandardMaterial({color:0xffd700, metalness:.6, roughness:.3}));
-  hatBand.position.y=1.98; hatBand.rotation.x=Math.PI/2;
-  group.add(hatBand);
-  // gun in hand (visual only, points local -Z)
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(.12,.12,.5), new THREE.MeshStandardMaterial({color:0x222222, metalness:.7, roughness:.3}));
-  gun.position.set(.32,1.05,-.35);
+
+  // Hair — short, dark brown, messy/spiky upward
+  const hairColor = 0x3a2618;
+  const hairBase = new THREE.Mesh(new THREE.SphereGeometry(.26,10,10,0,Math.PI*2,0,Math.PI*0.55), new THREE.MeshStandardMaterial({color:hairColor, roughness:.9}));
+  hairBase.position.y=2.03;
+  group.add(hairBase);
+  for(let i=0;i<6;i++){
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(.05,.17,5), new THREE.MeshStandardMaterial({color:hairColor, roughness:.9}));
+    const a = (i/6)*Math.PI*2;
+    spike.position.set(Math.cos(a)*.12, 2.17, Math.sin(a)*.12*0.6-.04);
+    spike.rotation.z = Math.cos(a)*0.5;
+    spike.rotation.x = -0.25 + Math.sin(a)*0.3;
+    group.add(spike);
+  }
+
+  // Backpack — where the weapons/money live, story-wise
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(.34,.42,.2), new THREE.MeshStandardMaterial({color:0x1c1c1e, roughness:.8}));
+  pack.position.set(0,1.25,.28); pack.castShadow=true;
+  group.add(pack);
+
+  // Gloves — black, fingerless
+  const gloveMat = new THREE.MeshStandardMaterial({color:0x141414, roughness:.6});
+  const gloveL = new THREE.Mesh(new THREE.SphereGeometry(.11,8,8), gloveMat);
+  gloveL.position.set(-.32,1.0,-.1);
+  group.add(gloveL);
+  const gloveR = new THREE.Mesh(new THREE.SphereGeometry(.11,8,8), gloveMat);
+  gloveR.position.set(.32,1.0,-.2);
+  group.add(gloveR);
+
+  // Sneakers — white with a red trim stripe
+  [-.14,.14].forEach(sx=>{
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(.2,.14,.34), new THREE.MeshStandardMaterial({color:0xf2f2f2, roughness:.6}));
+    shoe.position.set(sx,.08,.05);
+    group.add(shoe);
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(.21,.05,.35), new THREE.MeshStandardMaterial({color:0xe63946}));
+    trim.position.set(sx,.03,.05);
+    group.add(trim);
+  });
+
+  // Weapon prop in hand (visual only, points local -Z) — starts as the
+  // wooden stick Fran opens the game with (see WEAPONS.palo).
+  const gun = new THREE.Mesh(new THREE.CylinderGeometry(.035,.045,.7,6), new THREE.MeshStandardMaterial({color:0x8a6238, roughness:.85}));
+  gun.position.set(.34,1.0,-.28); gun.rotation.z=.5;
   group.add(gun);
+
   group.position.set(0,0,10);
 
   return {
@@ -783,15 +870,151 @@ function createPlayer(){
     hp:100, maxHp:100, dmgMult:1,
     money:120, power:0,
     velY:0, grounded:true,
-    weapon:'pistola',
+    weapon:'palo',
     weapons: JSON.parse(JSON.stringify(WEAPONS)),
     cooldown:0, reloading:false, reloadTimer:0,
     lastHitTime:-10,
     dead:false,
     interiorFloorY:0,
-    buildingsOwned:0
+    buildingsOwned:0,
+    // 💥 combo de golpes — see performAttack()'s melee branch / updateCombo()
+    comboCount:0, comboTimer:0,
   };
 }
+
+/* ============================================================
+   ENEMY ROSTER — per-district gangs, elites, and named bosses
+   ============================================================
+   Every enemy (outdoor thug, indoor defender, or boss) is built from the
+   SAME base humanoid (capsule body + sphere head, in createEnemy) dressed
+   with one accessory mesh + one weapon-prop mesh picked from the small
+   builder libraries below. That's what makes 20+ distinct-looking enemy
+   types affordable: no bespoke geometry per type, just data-driven
+   accessory/weapon/color/stat combinations reusing the same low-poly kit
+   as the rest of the game. atkStyle picks which of the three attack
+   patterns updateEnemies() runs: 'melee' (direct contact damage, no
+   projectile), 'ranged' (fires a projectile, see fireEnemyProjectile), or
+   'charge' (rushes at elevated speed then hits on contact like melee). */
+const ENEMY_TYPES = {
+  // Barrio Norte — Los Elegantes: fast but weak, mostly melee
+  cadete:            {name:'Cadete',          outfit:0x3d5aff, accessory:'cap',      weaponProp:'hockeyStick', atkStyle:'melee',  hpMult:.75, dmgMult:.8,  speedMult:1.25, rangeMult:1},
+  boxeador:          {name:'Boxeador',        outfit:0xE0A878, accessory:'headband', weaponProp:'gloves',      atkStyle:'melee',  hpMult:1.0, dmgMult:1.1, speedMult:1.05, rangeMult:1, cooldownMult:.7},
+  skater:            {name:'Skater',          outfit:0x8a5aa8, accessory:'capBack',  weaponProp:'skateboard',  atkStyle:'charge', hpMult:.65, dmgMult:.9,  speedMult:1.6,  rangeMult:1},
+  guardiaNorteElite: {name:'Guardia Norte',   outfit:0x14141a, accessory:'shades',   weaponProp:'baton',       atkStyle:'melee',  hpMult:2.1, dmgMult:1.3, speedMult:1.0,  rangeMult:1.1, elite:true},
+  // Barrio Sur — Los Pesados: slow, tanky, melee/shotgun
+  bruto:             {name:'Bruto',           outfit:0x1a1a1a, accessory:'none',    weaponProp:'hammer',      atkStyle:'melee',  hpMult:1.5, dmgMult:1.3, speedMult:.75,  rangeMult:1.1},
+  mecanico:          {name:'Mecánico',        outfit:0x3d5aff, accessory:'none',    weaponProp:'wrench',      atkStyle:'melee',  hpMult:1.2, dmgMult:1.1, speedMult:.85,  rangeMult:1},
+  pandillero:        {name:'Pandillero',      outfit:0x2a2a2e, accessory:'none',    weaponProp:'pipe',        atkStyle:'melee',  hpMult:1.1, dmgMult:1.15,speedMult:.9,   rangeMult:1},
+  matonSurElite:     {name:'Matón Sur',       outfit:0x1c1c20, accessory:'mask',    weaponProp:'shotgun',     atkStyle:'ranged', hpMult:2.3, dmgMult:1.5, speedMult:.8,   rangeMult:1.1, elite:true},
+  // Barrio Este — Los Tecnológicos: ranged/tech
+  hacker:            {name:'Hacker',          outfit:0x1a1a2e, accessory:'hoodMask',weaponProp:'tablet',      atkStyle:'ranged', hpMult:.8,  dmgMult:.9,  speedMult:1.0,  rangeMult:1.5},
+  operadorDrone:     {name:'Operador Drone',  outfit:0x2e2e3a, accessory:'antenna', weaponProp:'droneRig',    atkStyle:'ranged', hpMult:.9,  dmgMult:1.1, speedMult:.9,   rangeMult:1.6},
+  corredor:          {name:'Corredor',        outfit:0xe6c65c, accessory:'visor',   weaponProp:'none',        atkStyle:'charge', hpMult:.7,  dmgMult:.85, speedMult:1.7,  rangeMult:1},
+  agenteDigitalElite:{name:'Agente Digital',  outfit:0x0e0e12, accessory:'helmet',  weaponProp:'rifle',       atkStyle:'ranged', hpMult:2.0, dmgMult:1.4, speedMult:1.1,  rangeMult:1.5, elite:true},
+  // Barrio Oeste — Los Rebeldes: aggressive and fast
+  obrero:            {name:'Obrero',          outfit:0xff8c3d, accessory:'hardHat', weaponProp:'mace',        atkStyle:'melee',  hpMult:1.1, dmgMult:1.15,speedMult:1.05, rangeMult:1},
+  bicibandido:       {name:'Bicibandido',     outfit:0x2a2a2e, accessory:'helmet',  weaponProp:'none',        atkStyle:'charge', hpMult:.7,  dmgMult:1.0, speedMult:1.75, rangeMult:1},
+  lenador:           {name:'Leñador',         outfit:0x8c3a28, accessory:'none',    weaponProp:'axe',         atkStyle:'melee',  hpMult:1.15,dmgMult:1.25,speedMult:1.1,  rangeMult:1},
+  capatazElite:      {name:'Capataz',         outfit:0xb8321c, accessory:'hardHatRed', weaponProp:'jackhammer', atkStyle:'melee', hpMult:2.4, dmgMult:1.6, speedMult:1.0, rangeMult:1.1, elite:true},
+  // Distrito Central — La Guardia del Rey: mixed, hardest
+  agente:            {name:'Agente',          outfit:0x14141a, accessory:'shades',  weaponProp:'pistol',      atkStyle:'ranged', hpMult:1.1, dmgMult:1.2, speedMult:1.1,  rangeMult:1.3},
+  guardiaPesado:     {name:'Guardia Pesado',  outfit:0x2a2a2e, accessory:'none',    weaponProp:'shield',      atkStyle:'melee',  hpMult:1.8, dmgMult:1.3, speedMult:.85,  rangeMult:1.1},
+  francotirador:     {name:'Francotirador',   outfit:0x4a5540, accessory:'none',    weaponProp:'rifle',       atkStyle:'ranged', hpMult:.8,  dmgMult:1.6, speedMult:.7,   rangeMult:2.2, cooldownMult:1.6},
+  demolicionista:    {name:'Demolicionista',  outfit:0x8a1c1c, accessory:'vest',    weaponProp:'grenade',     atkStyle:'ranged', hpMult:1.0, dmgMult:1.5, speedMult:.9,   rangeMult:1.4},
+  guardiaRealElite:  {name:'Guardia Real',    outfit:0x14141a, accessory:'tacticalHelmet', weaponProp:'assaultRifle', atkStyle:'ranged', hpMult:2.6, dmgMult:1.7, speedMult:1.0, rangeMult:1.6, elite:true},
+};
+// Which regular types + which single elite type can spawn in each district
+// identity — both outdoor thugs and indoor defenders draw from this.
+const DISTRICT_ENEMY_POOL = {
+  residencialAlto:  {regular:['cadete','boxeador','skater'],                        elite:'guardiaNorteElite'},
+  industrial:       {regular:['bruto','mecanico','pandillero'],                     elite:'matonSurElite'},
+  comercial:        {regular:['hacker','operadorDrone','corredor'],                 elite:'agenteDigitalElite'},
+  residencialMedio: {regular:['obrero','bicibandido','lenador'],                    elite:'capatazElite'},
+  financiero:       {regular:['agente','guardiaPesado','francotirador','demolicionista'], elite:'guardiaRealElite'},
+};
+// Per-district combat feel: Norte is fast-but-fragile, Sur is a slow
+// damage-sponge, Este leans on range/detection, Oeste is aggressive, and
+// Central (hardest) stacks every multiplier up.
+const DISTRICT_DIFFICULTY = {
+  residencialAlto:  {hp:.85, dmg:.85, speed:1.2, detect:1.0},
+  industrial:       {hp:1.4, dmg:1.1, speed:.8,  detect:1.0},
+  comercial:        {hp:1.0, dmg:1.0, speed:1.0, detect:1.3},
+  residencialMedio: {hp:1.0, dmg:1.15,speed:1.3, detect:1.1},
+  financiero:       {hp:1.3, dmg:1.35,speed:1.1, detect:1.2},
+};
+// ⚡ "Corre más rápido que los demás": Fran's sprint (7.6, see updatePlayer)
+// must always beat any enemy, even a charge-type at full district/elite
+// speed multipliers stacked together — this cap is enforced both at spawn
+// (spawnTypedEnemy) and at the charge-approach multiplier (updateEnemies).
+const ENEMY_MAX_SPEED = 6.2;
+// The five named bosses — each lives ONLY inside their district's "Edificio
+// Final" (see BOSS_LAIR_DEFS / generateDistrictBuildings) as the last
+// defender, never roaming outdoors like a regular thug.
+const BOSS_DEFS = {
+  lucas: {name:'Lucas "El Elegante"',      barrioId:'norte',  outfit:0x2a4a8a, accessory:'hairSwoop', weaponProp:'goldBat',   atkStyle:'melee',  hp:260, dmg:16, speed:5.0, detect:16, attackRange:3.2,  cooldown:.9,  moneyMin:400, moneyMax:400, powerReward:40,  scale:1.3},
+  nico:  {name:'Nico "El Toro"',           barrioId:'sur',    outfit:0x1a1a1a, accessory:'none',      weaponProp:'pipe',      atkStyle:'melee',  hp:340, dmg:20, speed:4.2, detect:16, attackRange:3.4,  cooldown:1.1, moneyMin:420, moneyMax:420, powerReward:45,  scale:1.45},
+  tomi:  {name:'Tomi "El Hacker"',         barrioId:'este',   outfit:0x0e0e14, accessory:'ledVisor',  weaponProp:'droneRig',  atkStyle:'ranged', hp:220, dmg:14, speed:4.0, detect:22, attackRange:16,   cooldown:.7,  moneyMin:440, moneyMax:440, powerReward:50,  scale:1.2},
+  lauti: {name:'Lauti "El Vaquero"',       barrioId:'oeste',  outfit:0x6b4226, accessory:'hat',       weaponProp:'woodBat',   atkStyle:'charge', hp:300, dmg:18, speed:5.6, detect:18, attackRange:3.0,  cooldown:1.0, moneyMin:460, moneyMax:460, powerReward:55,  scale:1.35},
+  dante: {name:'Dante "El Rey del Barrio"',barrioId:'central',outfit:0x14141a, accessory:'slickHair', weaponProp:'pistolGold',atkStyle:'ranged', hp:650, dmg:24, speed:4.8, detect:26, attackRange:20,   cooldown:.55, moneyMin:1200,moneyMax:1200,powerReward:150, scale:1.5},
+};
+// The signature "Edificio Final" per district — forced into
+// generateDistrictBuildings as a guaranteed extra building (never part of
+// the random DISTRICT_BUILDING_POOL draw), always the last room's defender.
+const BOSS_LAIR_DEFS = {
+  norte:   {bossKey:'lucas', type:'clubSocialNorte'},
+  sur:     {bossKey:'nico',  type:'fabricaAbandonada'},
+  este:    {bossKey:'tomi',  type:'centroTecnologico'},
+  oeste:   {bossKey:'lauti', type:'depositoFerroviario'},
+  central: {bossKey:'dante', type:'municipalidad'},
+};
+
+/* Small builder libraries for enemy accessories/weapon props — each is a
+   tiny primitive mesh (or group of 2-3), positioned relative to the shared
+   humanoid base built in createEnemy. `s` is the enemy's overall scale. */
+const ENEMY_ACCESSORY_BUILDERS = {
+  none: ()=>null,
+  cap: (s)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(.29*s,10,10,0,Math.PI*2,0,Math.PI/2), new THREE.MeshStandardMaterial({color:0x1c1c22})); m.position.y=1.9*s; m.rotation.x=Math.PI; return m; },
+  headband: (s)=>{ const m=new THREE.Mesh(new THREE.TorusGeometry(.28*s,.05*s,6,12), new THREE.MeshStandardMaterial({color:0xe63946})); m.position.y=1.85*s; m.rotation.x=Math.PI/2; return m; },
+  capBack: (s)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(.3*s,.3*s,.14*s,10), new THREE.MeshStandardMaterial({color:0x8a5aa8})); m.position.set(0,1.92*s,.06*s); m.rotation.x=.3; return m; },
+  shades: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.42*s,.1*s,.06*s), new THREE.MeshStandardMaterial({color:0x0a0a0a})); m.position.set(0,1.82*s,-.24*s); return m; },
+  mask: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.3*s,.18*s,.08*s), new THREE.MeshStandardMaterial({color:0x111111})); m.position.set(0,1.75*s,-.22*s); return m; },
+  hoodMask: (s)=>{ const g=new THREE.Group(); const hood=new THREE.Mesh(new THREE.SphereGeometry(.32*s,10,10), new THREE.MeshStandardMaterial({color:0x1a1a2e})); hood.position.y=1.85*s; hood.scale.set(1,1.1,1); g.add(hood); const led=new THREE.Mesh(new THREE.BoxGeometry(.26*s,.14*s,.05*s), new THREE.MeshStandardMaterial({color:0x4ad6ff, emissive:0x4ad6ff, emissiveIntensity:.6})); led.position.set(0,1.78*s,-.25*s); g.add(led); return g; },
+  antenna: (s)=>{ const g=new THREE.Group(); const rod=new THREE.Mesh(new THREE.CylinderGeometry(.02*s,.02*s,.5*s,4), new THREE.MeshStandardMaterial({color:0x888888})); rod.position.y=2.05*s; g.add(rod); const tip=new THREE.Mesh(new THREE.SphereGeometry(.05*s,6,6), new THREE.MeshStandardMaterial({color:0xff3333, emissive:0xff3333, emissiveIntensity:.7})); tip.position.y=2.32*s; g.add(tip); return g; },
+  visor: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.46*s,.12*s,.08*s), new THREE.MeshStandardMaterial({color:0x4ad6ff, emissive:0x1a5a7a, emissiveIntensity:.5})); m.position.set(0,1.83*s,-.24*s); return m; },
+  ledVisor: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.46*s,.12*s,.08*s), new THREE.MeshStandardMaterial({color:0xff3d7a, emissive:0xff3d7a, emissiveIntensity:.6})); m.position.set(0,1.83*s,-.24*s); return m; },
+  helmet: (s)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(.31*s,10,10), new THREE.MeshStandardMaterial({color:0x0e0e12, metalness:.5, roughness:.4})); m.position.y=1.86*s; return m; },
+  hardHat: (s)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(.3*s,10,8,0,Math.PI*2,0,Math.PI*.55), new THREE.MeshStandardMaterial({color:0xffd23d})); m.position.y=1.92*s; return m; },
+  hardHatRed: (s)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(.32*s,10,8,0,Math.PI*2,0,Math.PI*.55), new THREE.MeshStandardMaterial({color:0xe63946})); m.position.y=1.94*s; return m; },
+  tacticalHelmet: (s)=>{ const g=new THREE.Group(); const dome=new THREE.Mesh(new THREE.SphereGeometry(.31*s,10,10), new THREE.MeshStandardMaterial({color:0x14141a})); dome.position.y=1.86*s; g.add(dome); const vis=new THREE.Mesh(new THREE.BoxGeometry(.4*s,.1*s,.06*s), new THREE.MeshStandardMaterial({color:0xffd700, metalness:.6})); vis.position.set(0,1.8*s,-.24*s); g.add(vis); return g; },
+  vest: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.5*s,.55*s,.32*s), new THREE.MeshStandardMaterial({color:0x8a1c1c, roughness:.7})); m.position.y=1.05*s; return m; },
+  hairSwoop: (s)=>{ const m=new THREE.Mesh(new THREE.ConeGeometry(.28*s,.3*s,8), new THREE.MeshStandardMaterial({color:0xe6c65c})); m.position.y=2.0*s; m.rotation.z=.4; return m; },
+  slickHair: (s)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(.29*s,10,10), new THREE.MeshStandardMaterial({color:0x0e0e0e})); m.position.set(0,1.9*s,-.03*s); m.scale.set(1,.85,1.1); return m; },
+  hat: (s)=>{ const g=new THREE.Group(); const brim=new THREE.Mesh(new THREE.CylinderGeometry(.4*s,.4*s,.05*s,14), new THREE.MeshStandardMaterial({color:0x6b4226})); brim.position.y=1.92*s; g.add(brim); const top=new THREE.Mesh(new THREE.CylinderGeometry(.24*s,.28*s,.22*s,14), new THREE.MeshStandardMaterial({color:0x6b4226})); top.position.y=2.04*s; g.add(top); return g; },
+};
+const ENEMY_WEAPON_BUILDERS = {
+  none: ()=>null,
+  hockeyStick: (s)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(.03*s,.03*s,1.0*s,6), new THREE.MeshStandardMaterial({color:0x8a6238})); m.position.set(.32*s,.75*s,-.2*s); m.rotation.z=.5; return m; },
+  gloves: (s)=>{ const g=new THREE.Group(); [.32,-.32].forEach(sx=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(.16*s,8,8), new THREE.MeshStandardMaterial({color:0xe63946})); m.position.set(sx*s,1.0*s,-.3*s); g.add(m); }); return g; },
+  skateboard: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.24*s,.05*s,.9*s), new THREE.MeshStandardMaterial({color:0x2a2a2e})); m.position.set(.4*s,.75*s,0); m.rotation.z=Math.PI/2.2; return m; },
+  baton: (s)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(.025*s,.025*s,.7*s,6), new THREE.MeshStandardMaterial({color:0x2a2a2e, metalness:.6})); m.position.set(.32*s,.9*s,-.25*s); m.rotation.z=.4; return m; },
+  hammer: (s)=>{ const g=new THREE.Group(); const handle=new THREE.Mesh(new THREE.CylinderGeometry(.04*s,.04*s,.8*s,6), new THREE.MeshStandardMaterial({color:0x5a4128})); handle.position.set(.32*s,.9*s,-.25*s); g.add(handle); const head=new THREE.Mesh(new THREE.BoxGeometry(.28*s,.16*s,.16*s), new THREE.MeshStandardMaterial({color:0x555560, metalness:.5})); head.position.set(.32*s,1.28*s,-.25*s); g.add(head); return g; },
+  wrench: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.1*s,.6*s,.06*s), new THREE.MeshStandardMaterial({color:0x888890, metalness:.6})); m.position.set(.32*s,1.0*s,-.28*s); m.rotation.z=.3; return m; },
+  pipe: (s)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(.05*s,.05*s,.75*s,8), new THREE.MeshStandardMaterial({color:0x777777, metalness:.6})); m.position.set(.32*s,.95*s,-.25*s); m.rotation.z=.4; return m; },
+  shotgun: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.12*s,.12*s,.75*s), new THREE.MeshStandardMaterial({color:0x2a1c14})); m.position.set(.32*s,1.0*s,-.4*s); return m; },
+  tablet: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.32*s,.42*s,.03*s), new THREE.MeshStandardMaterial({color:0x111111, emissive:0x2a5a8a, emissiveIntensity:.4})); m.position.set(.32*s,1.0*s,-.3*s); return m; },
+  droneRig: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.3*s,.36*s,.18*s), new THREE.MeshStandardMaterial({color:0x2e2e3a})); m.position.set(0,1.3*s,.3*s); return m; },
+  rifle: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.1*s,.1*s,.9*s), new THREE.MeshStandardMaterial({color:0x1c1c1c, metalness:.4})); m.position.set(.3*s,1.0*s,-.45*s); return m; },
+  mace: (s)=>{ const g=new THREE.Group(); const handle=new THREE.Mesh(new THREE.CylinderGeometry(.04*s,.04*s,.7*s,6), new THREE.MeshStandardMaterial({color:0x3a3a3e})); handle.position.set(.32*s,.9*s,-.25*s); g.add(handle); const head=new THREE.Mesh(new THREE.SphereGeometry(.18*s,8,8), new THREE.MeshStandardMaterial({color:0x555555, metalness:.6})); head.position.set(.32*s,1.28*s,-.25*s); g.add(head); return g; },
+  axe: (s)=>{ const g=new THREE.Group(); const handle=new THREE.Mesh(new THREE.CylinderGeometry(.03*s,.03*s,.85*s,6), new THREE.MeshStandardMaterial({color:0x5a4128})); handle.position.set(.32*s,.95*s,-.25*s); g.add(handle); const blade=new THREE.Mesh(new THREE.ConeGeometry(.16*s,.28*s,4), new THREE.MeshStandardMaterial({color:0xaaaaaa, metalness:.6})); blade.position.set(.32*s,1.35*s,-.25*s); blade.rotation.z=Math.PI/2; g.add(blade); return g; },
+  jackhammer: (s)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(.08*s,.08*s,.9*s,8), new THREE.MeshStandardMaterial({color:0xff8c3d, metalness:.4})); m.position.set(.32*s,1.0*s,-.3*s); return m; },
+  pistol: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.1*s,.12*s,.4*s), new THREE.MeshStandardMaterial({color:0x1a1a1a, metalness:.5})); m.position.set(.3*s,1.0*s,-.3*s); return m; },
+  shield: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.05*s,.7*s,.45*s), new THREE.MeshStandardMaterial({color:0x2a2a2e, metalness:.5})); m.position.set(-.35*s,1.0*s,0); return m; },
+  grenade: (s)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(.14*s,8,8), new THREE.MeshStandardMaterial({color:0x3a4a2a})); m.position.set(.32*s,1.0*s,-.3*s); return m; },
+  assaultRifle: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.1*s,.12*s,1.0*s), new THREE.MeshStandardMaterial({color:0x14141a, metalness:.5})); m.position.set(.3*s,1.0*s,-.5*s); return m; },
+  goldBat: (s)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(.04*s,.09*s,.85*s,8), new THREE.MeshStandardMaterial({color:0xffd700, metalness:.6, roughness:.3})); m.position.set(.32*s,1.0*s,-.3*s); m.rotation.z=.5; return m; },
+  woodBat: (s)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(.04*s,.09*s,.85*s,8), new THREE.MeshStandardMaterial({color:0x8a6238, roughness:.8})); m.position.set(.32*s,1.0*s,-.3*s); m.rotation.z=.5; return m; },
+  pistolGold: (s)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(.1*s,.12*s,.42*s), new THREE.MeshStandardMaterial({color:0xffd700, metalness:.7, roughness:.25})); m.position.set(.3*s,1.0*s,-.3*s); return m; },
+};
 
 /* ---------- Enemy factory ---------- */
 function makeHealthBar(){
@@ -804,9 +1027,41 @@ function makeHealthBar(){
   return group;
 }
 
+/* Resolves a named enemy type (from ENEMY_TYPES) against a district's
+   difficulty multipliers and a base stat block, then hands off to
+   createEnemy — the single place outdoor thugs AND indoor defenders both
+   go through, so the same 20-type roster + per-district tuning applies
+   everywhere a district's gang shows up. */
+function spawnTypedEnemy(barrio, x, z, typeKey, baseStats, extra){
+  const t = ENEMY_TYPES[typeKey];
+  const diff = DISTRICT_DIFFICULTY[barrio.layout] || {hp:1,dmg:1,speed:1,detect:1};
+  // Melee/charge types must actually close to point-blank before they can
+  // hit — they get a small fixed contact range, NOT the large ranged base
+  // (which is tuned for thrown/fired projectiles reaching across a street).
+  // Only true 'ranged' types use the district-scaled base attackRange.
+  const rangeBase = t.atkStyle==='ranged' ? baseStats.attackRange : (baseStats.meleeRange||3.2);
+  return createEnemy(barrio, x, z, Object.assign({
+    kind:typeKey, name:t.name, color:t.outfit, accessory:t.accessory, weaponProp:t.weaponProp,
+    atkStyle:t.atkStyle,
+    hp: Math.round(baseStats.hp*t.hpMult*diff.hp),
+    dmg: Math.round(baseStats.dmg*t.dmgMult*diff.dmg),
+    speed: Math.min(ENEMY_MAX_SPEED, baseStats.speed*t.speedMult*diff.speed),
+    detect: baseStats.detect*diff.detect,
+    attackRange: rangeBase*(t.rangeMult||1),
+    cooldown: baseStats.cooldown*(t.cooldownMult||1),
+    moneyMin: baseStats.moneyMin, moneyMax: baseStats.moneyMax, powerReward: baseStats.powerReward,
+    scale: t.elite ? 1.25 : 1,
+  }, extra||{}));
+}
+
+/* Street presence for a district: regular gang members from its
+   DISTRICT_ENEMY_POOL, with an occasional elite mixed in. Named bosses no
+   longer roam out here — they wait inside their "Edificio Final" (see
+   BOSS_LAIR_DEFS / spawnInteriorEnemies), so domination now genuinely
+   requires finding and clearing that building, not just the street. */
 function spawnBarrioEnemies(barrio){
-  const isFinal = barrio.boss==='final';
-  const gangColor = barrio.color;
+  const pool = DISTRICT_ENEMY_POOL[barrio.layout];
+  if(!pool) return; // home district: no gang, nothing to spawn
   // Districts got ~2.6x bigger — spread enemies out over more of that space,
   // but DON'T scale detect/attackRange by the same full factor: that would
   // let every enemy in the district aggro simultaneously from far away and
@@ -816,43 +1071,42 @@ function spawnBarrioEnemies(barrio){
   const sizeScale = barrio.size/50;
   const engageScale = Math.min(1.6, 1 + (sizeScale-1)*0.35);
   const ringR = 14*sizeScale;
+  const baseStats = { hp:60, dmg:8, speed:4.3, detect:28*engageScale, attackRange:19*engageScale, cooldown:1.35, moneyMin:20, moneyMax:40, powerReward:5 };
   for(let i=0;i<barrio.thugs;i++){
     const ang = (i/barrio.thugs)*Math.PI*2;
     const ex = barrio.x + Math.cos(ang)*ringR;
     const ez = barrio.z + Math.sin(ang)*ringR;
-    createEnemy(barrio, ex, ez, {
-      kind:'thug', color:gangColor, hp:isFinal?85:60, dmg:isFinal?11:8,
-      speed:4.3, detect:28*engageScale, attackRange:19*engageScale, cooldown:1.35,
-      moneyMin:20,moneyMax:40, powerReward:5, scale:1
-    });
-  }
-  if(barrio.boss==='mini'){
-    createEnemy(barrio, barrio.x, barrio.z-6*sizeScale, {
-      kind:'boss', color: shadeColor(gangColor,-0.35), hp:150, dmg:14,
-      speed:4.8, detect:32*engageScale, attackRange:20*engageScale, cooldown:1.0,
-      moneyMin:150,moneyMax:150, powerReward:20, scale:1.25
-    });
-  } else if(barrio.boss==='final'){
-    createEnemy(barrio, barrio.x, barrio.z-8*sizeScale, {
-      kind:'finalboss', color:0x1a0000, hp:420, dmg:20,
-      speed:5.2, detect:36*engageScale, attackRange:22*engageScale, cooldown:.8,
-      moneyMin:500,moneyMax:500, powerReward:80, scale:1.55
-    });
+    const useElite = i>0 && i%4===0; // one in four is the district's elite
+    const typeKey = useElite ? pool.elite : pool.regular[i%pool.regular.length];
+    spawnTypedEnemy(barrio, ex, ez, typeKey, baseStats);
   }
 }
 
-function createEnemy(barrio, x, z, opts){
+/* Shared humanoid builder: capsule body + sphere head + one accessory mesh +
+   one weapon-prop mesh, picked from the small builder libraries above.
+   Used by createEnemy (full combat entity) AND by the cosmetic/companion
+   NPCs (recruit-prompt marker, recruited friend) that just need the same
+   look without the combat bookkeeping. */
+function buildHumanoidModel(accessory, weaponProp, color, scale){
   const group = new THREE.Group();
-  const scale = opts.scale||1;
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.42*scale,.95*scale,4,8), new THREE.MeshStandardMaterial({color:opts.color, roughness:.6}));
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.42*scale,.95*scale,4,8), new THREE.MeshStandardMaterial({color, roughness:.6}));
   body.position.y=1.05*scale; body.castShadow=true;
   group.add(body);
   const head = new THREE.Mesh(new THREE.SphereGeometry(.27*scale,12,12), new THREE.MeshStandardMaterial({color:0xC98A5B, roughness:.8}));
   head.position.y=1.78*scale; head.castShadow=true;
   group.add(head);
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(.1,.1,.4), new THREE.MeshStandardMaterial({color:0x1a1a1a}));
-  gun.position.set(.3*scale,1.0*scale,-.3*scale);
-  group.add(gun);
+  const accBuild = ENEMY_ACCESSORY_BUILDERS[accessory] || ENEMY_ACCESSORY_BUILDERS.none;
+  const acc = accBuild(scale);
+  if(acc) group.add(acc);
+  const wpnBuild = ENEMY_WEAPON_BUILDERS[weaponProp] || ENEMY_WEAPON_BUILDERS.none;
+  const wpn = wpnBuild(scale);
+  if(wpn) group.add(wpn);
+  return group;
+}
+
+function createEnemy(barrio, x, z, opts){
+  const scale = opts.scale||1;
+  const group = buildHumanoidModel(opts.accessory, opts.weaponProp, opts.color, scale);
   const hbar = makeHealthBar();
   hbar.position.y = 2.3*scale;
   group.add(hbar);
@@ -868,8 +1122,9 @@ function createEnemy(barrio, x, z, opts){
   const indoor = !!opts.indoor;
   const enemy = {
     group, hbar, hitMesh, barrio,
-    kind:opts.kind, hp:opts.hp, maxHp:opts.hp, dmg:opts.dmg,
+    kind:opts.kind, name:opts.name||null, hp:opts.hp, maxHp:opts.hp, dmg:opts.dmg,
     speed:opts.speed, detect:opts.detect, attackRange:opts.attackRange,
+    atkStyle: opts.atkStyle||'ranged',
     cooldownMax:opts.cooldown, cooldown: Math.random()*opts.cooldown,
     moneyMin:opts.moneyMin, moneyMax:opts.moneyMax, powerReward:opts.powerReward,
     state:'idle', waypoint:{x,z}, alive:true,
@@ -879,6 +1134,7 @@ function createEnemy(barrio, x, z, opts){
     // Interior-only fields — see updateEnemies()'s indoor branch and
     // spawnInteriorEnemies(). Outdoor enemies leave these as null/false.
     indoor, building: opts.building||null, roomBounds: opts.roomBounds||null,
+    isBoss: !!opts.isBoss,
   };
   hitMesh.userData.enemyRef = enemy;
   if(!indoor) barrio.enemyList.push(enemy); // indoor enemies are tracked on building.enemiesRemaining instead
@@ -992,16 +1248,25 @@ const BUILDING_TYPES = {
   panaderia:       {name:'Panadería',        archetype:'small',  income:3,  color:0xd6a44a, furn:'dine'},
   centroComunitario:{name:'Centro Comunitario', archetype:'medium', income:5, color:0xe6c65c, furn:'office'},
   municipalidad:   {name:'Municipalidad',    archetype:'huge',   income:26, color:0xe8ecf0, furn:'office'},
+  // Boss lairs ("Edificio Final") — never part of a DISTRICT_BUILDING_POOL
+  // random draw, always force-placed exactly once per district by
+  // generateDistrictBuildings via BOSS_LAIR_DEFS.
+  clubSocialNorte:     {name:'Club Social Norte',     archetype:'large', income:45, color:0x1c3a6e, furn:'gym'},
+  fabricaAbandonada:   {name:'Fábrica Abandonada',    archetype:'huge',  income:50, color:0x33302c, furn:'industrial'},
+  centroTecnologico:   {name:'Centro Tecnológico',    archetype:'large', income:48, color:0x1a1a2e, furn:'office'},
+  depositoFerroviario: {name:'Depósito Ferroviario',  archetype:'huge',  income:50, color:0x4a3020, furn:'industrial'},
 };
 // Which building types can appear in each district identity — matches the
 // district's own theme (see DISTRICT_IDENTITY) and the brief's per-barrio list.
+// (Each district's boss lair is force-placed separately — see BOSS_LAIR_DEFS
+// — so it's deliberately absent from these random-draw pools.)
 const DISTRICT_BUILDING_POOL = {
   plaza:            ['tienda','restaurante','oficina','cafeteria'], // home district: decorative only, never conquerable
   residencialAlto:  ['casa','departamento','cafeteria','restaurante','gimnasio','oficina','banco'],
   industrial:       ['galpon','fabrica','taller','estacionamiento','gasolinera','casa'],
   comercial:        ['tienda','supermercado','hotel','restaurante','cine','centroComercial','estacionamiento'],
   residencialMedio: ['casa','escuela','tienda','farmacia','panaderia','centroComunitario'],
-  financiero:       ['banco','oficina','hotel','centroComercial','restaurante','municipalidad'],
+  financiero:       ['banco','oficina','hotel','centroComercial','restaurante'],
 };
 const FURNITURE_SETS = {
   home:       ['bed','sofa','table','shelf'],
@@ -1791,14 +2056,15 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
   const placed = [];
   const buildings = [];
   const GAP = 6;
-  for(let n=0; n<targetCount; n++){
-    const typeKey = pool[Math.floor(rand()*pool.length)];
+  let n = 0;
+
+  function placeOne(typeKey, extra, tryBudget){
     const type = BUILDING_TYPES[typeKey];
     const arch = BUILDING_ARCHETYPES[type.archetype];
     const size = arch.footprint[0] + rand()*(arch.footprint[1]-arch.footprint[0]);
     const w = size, d = size*(0.8+rand()*0.4);
     let ok=false, x=0, z=0, hw=0, hd=0;
-    for(let tries=0; tries<30 && !ok; tries++){
+    for(let tries=0; tries<(tryBudget||30) && !ok; tries++){
       x = barrio.x + (rand()*2-1)*half;
       z = barrio.z + (rand()*2-1)*half;
       hw = w/2+GAP/2; hd = d/2+GAP/2;
@@ -1810,18 +2076,30 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
         if(Math.abs(x-p.x) < hw+p.hw && Math.abs(z-p.z) < hd+p.hd) ok=false;
       }
     }
-    if(!ok) continue;
+    if(!ok) return;
     placed.push({x,z,hw,hd});
 
     const floors = arch.floors[0] + Math.floor(rand()*(arch.floors[1]-arch.floors[0]+1));
     const h = floors*FLOOR_H + 0.6;
     const enemyCount = arch.enemies[0] + Math.floor(rand()*(arch.enemies[1]-arch.enemies[0]+1));
-    buildings.push({
-      id: barrio.id+'_b'+n, barrio, type:typeKey, x, z, w, d, h, floors,
+    buildings.push(Object.assign({
+      id: barrio.id+'_b'+(n++), barrio, type:typeKey, x, z, w, d, h, floors,
       owned:false, enemiesRemaining:enemyCount, enemyCountTotal:enemyCount,
       mesh:null, roofMesh:null, emblemMesh:null,
       doorPos:{x, z:z+d/2}, doorTrigger:{x, z:z+d/2+1.3},
-    });
+    }, extra||{}));
+  }
+
+  // The district's "Edificio Final" — its named boss's lair — is placed
+  // FIRST (a generous try budget, and nothing else is occupying the plot
+  // yet) so every rival district reliably gets exactly one, per
+  // BOSS_LAIR_DEFS. It's never part of the random DISTRICT_BUILDING_POOL draw.
+  const lair = BOSS_LAIR_DEFS[barrio.id];
+  if(lair) placeOne(lair.type, {isBossLair:true, bossKey:lair.bossKey}, 50);
+
+  for(let i=0; i<targetCount; i++){
+    const typeKey = pool[Math.floor(rand()*pool.length)];
+    placeOne(typeKey);
   }
   return buildings;
 }
@@ -2165,30 +2443,65 @@ function disposeInteriorContents(){
    one of the building's rooms ("defend distinct rooms") using a seed that's
    stable across visits, so partial progress (some already killed on an
    earlier visit) always leaves the SAME ones behind rather than reshuffling. */
+/* Builds one district's named boss inside their "Edificio Final" — see
+   BOSS_DEFS/BOSS_LAIR_DEFS. Bosses never spawn anywhere else. */
+function spawnBossEnemy(barrio, building, spot){
+  const lair = BOSS_LAIR_DEFS[barrio.id];
+  const b = BOSS_DEFS[lair.bossKey];
+  const en = createEnemy(barrio, spot.x, spot.z, {
+    kind:lair.bossKey, name:b.name, color:b.outfit, accessory:b.accessory, weaponProp:b.weaponProp,
+    atkStyle:b.atkStyle, hp:b.hp, dmg:b.dmg, speed:b.speed, detect:b.detect, attackRange:b.attackRange,
+    cooldown:b.cooldown, moneyMin:b.moneyMin, moneyMax:b.moneyMax, powerReward:b.powerReward, scale:b.scale,
+    indoor:true, building, roomBounds:spot.roomBounds, roomRadius:spot.roomRadius, isBoss:true,
+  });
+  return en;
+}
+
 function spawnInteriorEnemies(building){
   if(building.owned || building.enemiesRemaining<=0) return;
   const barrio = building.barrio;
   const spawns = building.roomSpawns.slice();
   const rand = makeSeededRandom(hashString(building.id+'_e'));
   for(let i=spawns.length-1;i>0;i--){ const j=Math.floor(rand()*(i+1)); const t=spawns[i]; spawns[i]=spawns[j]; spawns[j]=t; }
-  // Districts get progressively tougher toward Barrio Central, same flavor
-  // as outdoor thugs but a bit gentler since indoor fights are close-range.
-  const diffScale = 1 + (barrio.boss==='final'?0.5:barrio.boss==='mini'?0.22:0);
+  const pool = DISTRICT_ENEMY_POOL[barrio.layout];
+  const baseStats = { hp:50, dmg:9, speed:3.6, detect:13, attackRange:11, meleeRange:2.6, cooldown:1.15, moneyMin:8, moneyMax:18, powerReward:2 };
+  const isLair = !!building.isBossLair;
   for(let i=0;i<building.enemiesRemaining;i++){
     const spot = spawns[i%spawns.length];
-    const en = createEnemy(barrio, spot.x, spot.z, {
-      kind:'thug', color:shadeColor(barrio.color,0.1), hp:Math.round(50*diffScale), dmg:Math.round(9*diffScale),
-      speed:3.6, detect:13, attackRange:9, cooldown:1.15,
-      moneyMin:8, moneyMax:18, powerReward:2, scale:1,
-      indoor:true, building, roomBounds:spot.roomBounds, roomRadius:spot.roomRadius,
-    });
+    const isLastDefender = i===building.enemiesRemaining-1;
+    let en;
+    if(isLair && isLastDefender){
+      // The named boss is always the very last defender, deepest in — you
+      // have to clear their gang first to reach them.
+      en = spawnBossEnemy(barrio, building, spot);
+    } else {
+      // The second-to-last defender in a boss lair is always the district's
+      // elite, guarding the approach to the boss.
+      const useElite = isLair && i===building.enemiesRemaining-2 && pool;
+      const typeKey = pool ? (useElite ? pool.elite : pool.regular[i%pool.regular.length]) : 'cadete';
+      en = spawnTypedEnemy(barrio, spot.x, spot.z, typeKey, baseStats, {
+        indoor:true, building, roomBounds:spot.roomBounds, roomRadius:spot.roomRadius,
+      });
+    }
     en.group.position.y = spot.y; // stand at this room's floor height, not ground level
     G.interior.enemies.push(en);
   }
 }
 
 /* ---------- enter / exit ---------- */
+/* Dante's Municipalidad only opens once the other four districts are
+   dominated — "Al conquistar los cinco distritos, desbloquea el combate
+   final contra Dante". Every other boss lair is open from the start. */
+function isLairLocked(building){
+  if(!building.isBossLair || building.bossKey!=='dante') return false;
+  return !G.barrios.filter(b=>!b.home && b.id!=='central').every(b=>b.owned);
+}
+
 function enterBuilding(building){
+  if(isLairLocked(building)){
+    showBanner('🔒 Necesitás dominar los otros 4 distritos antes de enfrentar a Dante');
+    return;
+  }
   const pl = G.player;
   G.vehicle.mounted = false;
   G.interior.outdoorReturnPos = {x:pl.group.position.x, z:pl.group.position.z};
@@ -2422,6 +2735,7 @@ function updateInteractionHint(){
   const key = isTouchDevice ? 'Tocá 🅴' : 'Presioná E';
   G.nearTransitPoint = null;
   G.nearBuildingDoor = null;
+  G.nearRecruit = null;
   if(G.interior.active){
     const et = G.interior.exitTrigger;
     if(et && Math.hypot(pp.x-et.x, pp.z-et.z) < 3){
@@ -2442,10 +2756,22 @@ function updateInteractionHint(){
     hint.classList.add('show');
     return;
   }
+  const recruit = findNearbyRecruit();
+  if(recruit){
+    G.nearRecruit = recruit;
+    hint.textContent = key+' para reclutar amigo 👥';
+    hint.classList.add('show');
+    return;
+  }
   const door = findNearbyBuildingDoor();
   if(door){
-    G.nearBuildingDoor = door;
     const info = BUILDING_TYPES[door.type];
+    if(isLairLocked(door)){
+      hint.textContent = '🔒 '+info.name+' — dominá los otros 4 distritos primero';
+      hint.classList.add('show');
+      return;
+    }
+    G.nearBuildingDoor = door;
     hint.textContent = key+' para entrar: '+info.name+(door.owned?' ✔':'');
     hint.classList.add('show');
     return;
@@ -2481,6 +2807,7 @@ function tryInteract(){
     veh.mounted = true;
     return;
   }
+  if(G.nearRecruit){ recruitFriend(G.nearRecruit); return; }
   if(G.nearBuildingDoor){ enterBuilding(G.nearBuildingDoor); return; }
   if(G.nearTransitPoint) openCityMap();
 }
@@ -2582,9 +2909,10 @@ function setupInput(){
       case 'KeyD': G.input.r=1; break;
       case 'ShiftLeft': case 'ShiftRight': G.input.run=true; break;
       case 'Space': tryJump(); break;
-      case 'Digit1': switchWeapon('pistola'); break;
+      case 'Digit1': switchWeapon('palo'); break;
       case 'Digit2': switchWeapon('bate'); break;
-      case 'Digit3': switchWeapon('escopeta'); break;
+      case 'Digit3': switchWeapon('pistola'); break;
+      case 'Digit4': switchWeapon('escopeta'); break;
       case 'KeyR': tryReload(); break;
       case 'KeyB': toggleShop(); break;
       case 'KeyM': toggleCityMap(); break;
@@ -2942,6 +3270,12 @@ function performAttack(){
   if(w.type==='melee'){
     sfxMelee();
     const pp = pl.group.position;
+    // 💥 Combo de golpes: consecutive landed melee swings (within
+    // pl.comboTimer's window, decayed in updateCombo) ramp damage up to
+    // +48% on the 5th hit in a row. Uses the combo count BEFORE this swing,
+    // so the very first hit of a fresh combo is baseline — a whiffed swing
+    // neither extends nor benefits from it.
+    const comboMult = 1 + Math.min(pl.comboCount,4)*0.12;
     let hitAny=false;
     G.enemies.forEach(en=>{
       if(!en.alive) return;
@@ -2951,11 +3285,16 @@ function performAttack(){
       const dot = (dx/dist)*fx + (dz/dist)*fz;
       const angle = Math.acos(Math.max(-1,Math.min(1,dot)));
       if(angle < w.angle/2){
-        damageEnemy(en, w.dmg*pl.dmgMult);
+        damageEnemy(en, w.dmg*pl.dmgMult*comboMult);
         hitAny=true;
       }
     });
-    if(hitAny) flashCrosshair();
+    if(hitAny){
+      flashCrosshair();
+      pl.comboCount = Math.min(5, pl.comboCount+1);
+      pl.comboTimer = 1.1;
+      updateComboHUD();
+    }
   } else {
     if(w.mag<=0){ tryReload(); return; }
     w.mag--;
@@ -2993,6 +3332,27 @@ function flashCrosshair(){
   setTimeout(()=>ch.classList.remove('hitflash'),120);
 }
 
+/* Combo window decay — ticks every frame regardless of attacking; once
+   comboTimer runs out the chain resets to zero (see performAttack's melee
+   branch for where it's built back up). */
+function updateCombo(dt){
+  const pl = G.player;
+  if(pl.comboTimer>0){
+    pl.comboTimer -= dt;
+    if(pl.comboTimer<=0){ pl.comboTimer=0; pl.comboCount=0; updateComboHUD(); }
+  }
+}
+function updateComboHUD(){
+  const el = document.getElementById('comboText');
+  if(!el) return;
+  if(G.player.comboCount>=2){
+    el.textContent = '💥 COMBO x'+G.player.comboCount;
+    el.classList.add('show');
+  } else {
+    el.classList.remove('show');
+  }
+}
+
 function damageEnemy(en, dmg, hitPoint){
   if(!en.alive) return;
   en.hp -= dmg;
@@ -3022,12 +3382,13 @@ function killEnemy(en){
     if(en.building.enemiesRemaining<=0 && !en.building.owned){
       conquerBuilding(en.building);
     }
-    return; // indoor kills feed building conquest, not the outdoor barrio.enemyList/boss flow
+    return; // indoor kills feed building conquest, not the outdoor barrio.enemyList flow
   }
-
-  if(en.barrio.enemyList.length===0 && !en.barrio.owned){
-    dominateBarrio(en.barrio);
-  }
+  // Clearing the street gang no longer dominates a district by itself —
+  // per "Domina cada distrito derrotando a su jefe", the boss living inside
+  // the Edificio Final (see conquerBuilding's isBossLair branch) is the
+  // real gate now. 80% building control (updateDistrictControl) is the
+  // only other path to the same outcome.
 }
 
 /* Clearing every defender inside a building conquers it permanently: it
@@ -3039,21 +3400,32 @@ function conquerBuilding(building){
   if(building.mesh) building.mesh.material.color.set(0xffd700);
   if(building.signMesh) building.barrio.detailGroup.remove(building.signMesh);
   addEmblem(building);
-  const bonus = Math.round(type.income*15);
+  const bonus = Math.round(type.income*15) + Math.round(type.income*1.5); // 🪙 Fran's small per-building bonus on top of the usual conquest payout
   G.player.money += bonus;
   G.player.power += 8;
   G.player.buildingsOwned = (G.player.buildingsOwned||0)+1;
   sfxDomination();
-  showBanner('🏢 ¡CONQUISTADO! '+type.name.toUpperCase()+' — +$'+bonus);
-  updateDistrictControl(building.barrio);
+
+  // Defeating the boss inside the Edificio Final is what actually dominates
+  // the district ("Domina cada distrito derrotando a su jefe") — everything
+  // else (recolor, bonus, victory check) flows through dominateBarrio().
+  if(building.isBossLair){
+    const bossName = BOSS_DEFS[BOSS_LAIR_DEFS[building.barrio.id].bossKey].name;
+    showBanner('👑 ¡'+bossName.toUpperCase()+' DERROTADO! '+type.name.toUpperCase()+' CONQUISTADO — +$'+bonus);
+    offerRecruit(building);
+    if(!building.barrio.owned) dominateBarrio(building.barrio);
+  } else {
+    showBanner('🏢 ¡CONQUISTADO! '+type.name.toUpperCase()+' — +$'+bonus);
+    updateDistrictControl(building.barrio);
+  }
 }
 
 function dominateBarrio(barrio){
   barrio.owned = true;
   barrio.zoneMesh.material.color.set(0xffd700);
   barrio.flagMesh.material.color.set(0xffd700);
-  const bonusMoney = barrio.boss==='final'?600:200;
-  const bonusPower = barrio.boss==='final'?80:25;
+  const bonusMoney = barrio.id==='central'?600:200;
+  const bonusPower = barrio.id==='central'?80:25;
   G.player.money += bonusMoney;
   G.player.power += bonusPower;
   sfxDomination();
@@ -3116,6 +3488,94 @@ function updateAllies(dt){
   });
 }
 
+/* ---------- recruitable friends: "👥 Puede reclutar amigos para que peleen con él" ----------
+   Defeating a district's boss frees one of their own gang to join Fran for
+   good. A marker appears at the lair's door — walk up and press E to
+   recruit. From then on they follow Fran and auto-attack any hostile enemy
+   that gets close (no independent targeting by enemies, no death — keeps
+   the companion AI to a single, cheap follow-and-swing loop). Visually
+   they're built from the SAME district gang look, just recolored gold —
+   the "now loyal to the family" language already used for conquered
+   buildings/districts. Central has no recruit: Dante is the final boss. */
+function offerRecruit(building){
+  const barrio = building.barrio;
+  if(barrio.id==='central' || barrio.friendRecruited || barrio.friendAvailable) return;
+  barrio.friendAvailable = true;
+  barrio.recruitSpot = {x:building.doorTrigger.x, z:building.doorTrigger.z};
+  const pool = DISTRICT_ENEMY_POOL[barrio.layout];
+  const t = ENEMY_TYPES[pool ? pool.regular[0] : 'cadete'];
+  const group = buildHumanoidModel(t.accessory, t.weaponProp, 0xffd700, 1);
+  group.position.set(barrio.recruitSpot.x, 0, barrio.recruitSpot.z);
+  G.scene.add(group);
+  barrio.recruitMesh = group;
+}
+
+function findNearbyRecruit(){
+  const pp = G.player.group.position;
+  let nearest=null, nearestD=3;
+  G.barrios.forEach(b=>{
+    if(!b.friendAvailable || b.friendRecruited || !b.recruitSpot) return;
+    const d = Math.hypot(pp.x-b.recruitSpot.x, pp.z-b.recruitSpot.z);
+    if(d<nearestD){ nearestD=d; nearest=b; }
+  });
+  return nearest;
+}
+
+function recruitFriend(barrio){
+  barrio.friendRecruited = true;
+  if(barrio.recruitMesh){ G.scene.remove(barrio.recruitMesh); barrio.recruitMesh=null; }
+  const pool = DISTRICT_ENEMY_POOL[barrio.layout];
+  const t = ENEMY_TYPES[pool ? pool.regular[0] : 'cadete'];
+  const group = buildHumanoidModel(t.accessory, t.weaponProp, 0xffd700, 1);
+  const pp = G.player.group.position;
+  group.position.set(pp.x, 0, pp.z);
+  G.scene.add(group);
+  const idx = G.friends.length;
+  G.friends.push({
+    group, hp:120, maxHp:120, dmg:12, speed:6.2, attackRange:3.2, cooldown:0, cooldownMax:.9,
+    followOffset: { x: (idx%2===0?-1.8:1.8), z: 2.0+idx*0.5 },
+  });
+  const bossName = BOSS_DEFS[BOSS_LAIR_DEFS[barrio.id].bossKey].name;
+  showBanner('👥 Un miembro de la banda de '+bossName.toUpperCase()+' se une a Fran');
+  sfxDomination();
+}
+
+/* Recruited companions: follow a position just behind/beside Fran, and if
+   any alive hostile enemy is within attackRange, swing at it on cooldown
+   (direct damageEnemy call — no projectile, no separate AI state machine).
+   They're never targeted by enemy AI, keeping updateEnemies() untouched. */
+function updateFriends(dt){
+  const pl = G.player;
+  G.friends.forEach(f=>{
+    // followOffset.x is sideways (right-positive), .z is behind-positive,
+    // both rotated into world space by the player's current facing.
+    const rx = Math.cos(G.camYaw), rz = -Math.sin(G.camYaw); // player's right
+    const bx = Math.sin(G.camYaw), bz = Math.cos(G.camYaw);  // behind the player
+    const tx = pl.group.position.x + rx*f.followOffset.x + bx*f.followOffset.z;
+    const tz = pl.group.position.z + rz*f.followOffset.x + bz*f.followOffset.z;
+    const dx = tx-f.group.position.x, dz = tz-f.group.position.z;
+    const d = Math.hypot(dx,dz);
+    if(d>0.6){
+      f.group.position.x += dx/d*f.speed*dt;
+      f.group.position.z += dz/d*f.speed*dt;
+    }
+
+    f.cooldown -= dt;
+    let target=null, targetD=f.attackRange;
+    G.enemies.forEach(en=>{
+      if(!en.alive) return;
+      const ed = Math.hypot(en.group.position.x-f.group.position.x, en.group.position.z-f.group.position.z);
+      if(ed<targetD){ targetD=ed; target=en; }
+    });
+    if(target){
+      f.group.rotation.y = Math.atan2(target.group.position.x-f.group.position.x, target.group.position.z-f.group.position.z);
+      if(f.cooldown<=0){ f.cooldown=f.cooldownMax; damageEnemy(target, f.dmg); }
+    } else if(d>0.6){
+      f.group.rotation.y = Math.atan2(dx,dz);
+    }
+  });
+}
+
 function damagePlayer(dmg){
   const pl = G.player;
   if(pl.dead) return;
@@ -3161,12 +3621,27 @@ function updateEnemies(dt){
     } else if(en.state==='combat'){
       faceDirection(en.group, dx, dz);
       if(horizDist>en.attackRange*0.82){
-        moveEnemy(en, dx/horizDist*en.speed*dt, dz/horizDist*en.speed*dt);
+        // Charge-style enemies (Skater, Corredor, Bicibandido...) rush in
+        // noticeably faster than they wander/reposition at — "embiste con
+        // velocidad" — while melee/ranged types just close the gap normally.
+        // Still capped at ENEMY_MAX_SPEED so Fran's sprint always outruns
+        // them, same guarantee as the spawn-time clamp in spawnTypedEnemy
+        // (this also covers named bosses, which bypass that helper).
+        const approachMult = en.atkStyle==='charge' ? 1.6 : 1;
+        const approachSpeed = Math.min(ENEMY_MAX_SPEED, en.speed*approachMult);
+        moveEnemy(en, dx/horizDist*approachSpeed*dt, dz/horizDist*approachSpeed*dt);
       }
       en.cooldown -= dt;
       if(dist<=en.attackRange && en.cooldown<=0){
         en.cooldown = en.cooldownMax*(0.8+Math.random()*0.4);
-        fireEnemyProjectile(en);
+        if(en.atkStyle==='melee' || en.atkStyle==='charge'){
+          // Direct contact damage, no projectile — matches a bat/pipe/axe/
+          // fist swing (or a bike/skateboard slamming in) better than a
+          // thrown object would.
+          damagePlayer(en.dmg);
+        } else {
+          fireEnemyProjectile(en);
+        }
       }
     }
 
@@ -3399,9 +3874,20 @@ function shopItems(){
   const items=[
     {id:'heal', name:'Curar del todo', desc:'Restaura toda tu vida.', cost:Math.max(10,Math.round(missing*2)), disabled:missing<1,
       action:()=>{ pl.hp=pl.maxHp; }},
-    {id:'ammoPistola', name:'Munición · Pistola', desc:'+30 balas de reserva.', cost:60, disabled:false,
-      action:()=>{ pl.weapons.pistola.reserve+=30; }},
   ];
+  // 3. "Compra mejores armas" — palo is free/starting, everything else is
+  // bought here once, then just needs ammo (for the ranged ones).
+  if(!pl.weapons.bate.owned){
+    items.push({id:'buyBate', name:'Comprar Bate', desc:'Cuerpo a cuerpo más fuerte que el palo.', cost:WEAPONS.bate.cost, disabled:false,
+      action:()=>{ pl.weapons.bate.owned=true; }});
+  }
+  if(pl.weapons.pistola.owned){
+    items.push({id:'ammoPistola', name:'Munición · Pistola', desc:'+30 balas de reserva.', cost:60, disabled:false,
+      action:()=>{ pl.weapons.pistola.reserve+=30; }});
+  } else {
+    items.push({id:'buyPistola', name:'Comprar Pistola', desc:'Tu primera arma de fuego.', cost:WEAPONS.pistola.cost, disabled:false,
+      action:()=>{ pl.weapons.pistola.owned=true; pl.weapons.pistola.reserve+=24; }});
+  }
   if(pl.weapons.escopeta.owned){
     items.push({id:'ammoEscopeta', name:'Munición · Escopeta', desc:'+12 cartuchos de reserva.', cost:80, disabled:false,
       action:()=>{ pl.weapons.escopeta.reserve+=12; }});
@@ -3548,10 +4034,12 @@ function resetGame(){
   G.popups.forEach(p=>p.el.remove());
   G.popups.length=0;
 
-  // Leave any building interior before wiping state, and drop the ally patrols.
+  // Leave any building interior before wiping state, and drop the ally patrols + recruited friends.
   if(G.interior.active){ disposeInteriorContents(); G.interior.active=false; G.interior.building=null; }
   G.allies.forEach(a=>G.scene.remove(a.group));
   G.allies.length=0;
+  G.friends.forEach(f=>G.scene.remove(f.group));
+  G.friends.length=0;
 
   G.barrios.forEach(b=>{
     b.enemyList.length=0;
@@ -3564,6 +4052,10 @@ function resetGame(){
       b.flagMesh.material.color.set(b.color);
       spawnBarrioEnemies(b);
     }
+    b.friendAvailable=false;
+    b.friendRecruited=false;
+    if(b.recruitMesh){ G.scene.remove(b.recruitMesh); b.recruitMesh=null; }
+    b.recruitSpot=null;
     if(b.buildings){
       b.buildings.forEach(bld=>{
         bld.owned=false;
@@ -3578,8 +4070,9 @@ function resetGame(){
   pl.hp=100; pl.maxHp=100; pl.dmgMult=1; pl.money=120; pl.power=0;
   pl._hpLevel=0; pl._dmgLevel=0;
   pl.weapons = JSON.parse(JSON.stringify(WEAPONS));
-  pl.weapon='pistola'; pl.cooldown=0; pl.reloading=false; pl.dead=false;
+  pl.weapon='palo'; pl.cooldown=0; pl.reloading=false; pl.dead=false;
   pl.buildingsOwned=0; pl.incomePerSec=0; pl.interiorFloorY=0;
+  pl.comboCount=0; pl.comboTimer=0;
   pl.group.position.set(0,0,10);
   pl.velY=0; pl.grounded=true;
 
@@ -3618,6 +4111,8 @@ function animate(){
       updateEnemies(dt);
       updateAllies(dt);
       updatePedestrians(dt);
+      updateFriends(dt);
+      updateCombo(dt);
       updateProjectiles(dt);
       updateEconomy(dt);
       updateWorldStreaming(dt);
