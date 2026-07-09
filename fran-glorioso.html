@@ -413,12 +413,12 @@ const STREAM_UNLOAD_RADIUS = 420;
 // every district gets a metro entrance ("la red de subte conecta toda la
 // ciudad") and a bus stop, home additionally gets the taxi stand hub.
 const BARRIO_DEFS = [
-  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:120, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null,   layout:'plaza',      transit:['metro','bus','taxi']},
-  {id:'norte',   name:'Barrio Norte',    x:0,    z:-320, size:130, color:0x3d8bff, home:false, owned:false, thugs:5, boss:'mini',  layout:'torres',     transit:['metro','bus']},
-  {id:'sur',     name:'Barrio Sur',      x:0,    z:320,  size:130, color:0x3ddc84, home:false, owned:false, thugs:5, boss:'mini',  layout:'residencial',transit:['metro','bus']},
-  {id:'este',    name:'Barrio Este',     x:320,  z:0,    size:130, color:0xff8c3d, home:false, owned:false, thugs:5, boss:'mini',  layout:'comercial',  transit:['metro','bus']},
-  {id:'oeste',   name:'Barrio Oeste',    x:-320, z:0,    size:130, color:0xd63dff, home:false, owned:false, thugs:5, boss:'mini',  layout:'mercado',    transit:['metro','bus']},
-  {id:'central', name:'Barrio Central',  x:0,    z:-700, size:155, color:0xe63946, home:false, owned:false, thugs:6, boss:'final', layout:'fortaleza',  transit:['metro','bus']}
+  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:120, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null,   layout:'plaza',          transit:['metro','bus','taxi']},
+  {id:'norte',   name:'Barrio Norte',    x:0,    z:-320, size:130, color:0x3d8bff, home:false, owned:false, thugs:5, boss:'mini',  layout:'residencialAlto',transit:['metro','bus']},
+  {id:'sur',     name:'Barrio Sur',      x:0,    z:320,  size:130, color:0x3ddc84, home:false, owned:false, thugs:5, boss:'mini',  layout:'industrial',     transit:['metro','bus']},
+  {id:'este',    name:'Barrio Este',     x:320,  z:0,    size:130, color:0xff8c3d, home:false, owned:false, thugs:5, boss:'mini',  layout:'comercial',      transit:['metro','bus']},
+  {id:'oeste',   name:'Barrio Oeste',    x:-320, z:0,    size:130, color:0xd63dff, home:false, owned:false, thugs:5, boss:'mini',  layout:'residencialMedio',transit:['metro','bus']},
+  {id:'central', name:'Barrio Central',  x:0,    z:-700, size:155, color:0xe63946, home:false, owned:false, thugs:6, boss:'final', layout:'financiero',     transit:['metro','bus']}
 ];
 
 const WEAPONS = {
@@ -624,7 +624,11 @@ function initScene(){
   G.scene.add(sun);
   G.scene.add(sun.target);
   G.sunLight = sun;
-  G.scene.add(new THREE.AmbientLight(0x556080,.35));
+  // Bumped up a bit from the original .35: with real per-building wall
+  // colors now in play (see DISTRICT_IDENTITY), a face turned away from the
+  // sun needs enough ambient fill to still read its material instead of
+  // going flat black — keeps the noir dusk mood but keeps facades legible.
+  G.scene.add(new THREE.AmbientLight(0x556080,.55));
 
   // ground
   const groundTexCanvas = document.createElement('canvas');
@@ -660,6 +664,7 @@ function initScene(){
     barrio.buildingAABBs = [];      // this barrio's own building footprints (collision)
     barrio.buildingMeshes = [];     // this barrio's own building meshes (camera-collision raycast)
     barrio.transitPoints = [];      // this barrio's metro/bus/taxi station world positions
+    barrio.pedestrians = [];        // cosmetic wandering NPCs — see spawnPedestrians()/updatePedestrians()
     barrio.detailBuilt = false;
     barrio.detailGroup = new THREE.Group();
     G.scene.add(barrio.detailGroup);
@@ -927,13 +932,21 @@ function makeSeededRandom(seed){
 // Per-district visual identity: building height range + color palette, how
 // big its park is, and roughly how many building "attempts" it gets (actual
 // count ends up lower once the plaza/park/street gaps are carved out).
+/* Each district identity drives BOTH the old decorative home-district boxes
+   AND the real conquerable buildings: heightRange/blockCount/parkSize sizing
+   as before, plus a realistic multi-material palette (wallPalette — picked
+   per-BUILDING, not once per district, so no barrio reads as a single flat
+   color), a roofPalette, a signature accentColor (neon/LED/etc for the
+   sign glow), treeDensity (extra trees scattered through the blocks, not
+   just the park), carPalette for parked cars, and a graffiti flag (only
+   Barrio Sur, per "evitando que toda la ciudad tenga el mismo estilo"). */
 const DISTRICT_IDENTITY = {
-  plaza:       { heightRange:[4,10],  palette:[0x6b6255,0x746a52,0x8a7a5c,0x5a5148], parkSize:1.25, blockCount:3 },
-  torres:      { heightRange:[14,32], palette:[0x4f5560,0x3c4450,0x5a6270,0x333a44], parkSize:0.75, blockCount:4 },
-  residencial: { heightRange:[3,6],   palette:[0x8a6f55,0x7a6248,0x9c8060,0x6e5842], parkSize:1.5,  blockCount:5 },
-  comercial:   { heightRange:[6,14],  palette:[0x5c6e78,0x46545c,0x6d818c,0x3e4a52], parkSize:0.85, blockCount:4 },
-  mercado:     { heightRange:[3,7],   palette:[0x8a4a3a,0x9c5a3a,0x704228,0x6e3c28], parkSize:1.1,  blockCount:5 },
-  fortaleza:   { heightRange:[10,24], palette:[0x2a1418,0x3a1a1e,0x1e0e10,0x241012], parkSize:0.6,  blockCount:3 },
+  plaza:        { heightRange:[4,10],  wallPalette:[0xcfc6ae,0xbfb6a0,0xd8d2c2,0x8a7355], roofPalette:[0x3a352c,0x4a4034], accentColor:0xffd700, parkSize:1.25, blockCount:3, treeDensity:1.0, carPalette:[0x1a1a20,0x8a1c24,0xd8d2c2], graffiti:false },
+  residencialAlto: { heightRange:[5,11], wallPalette:[0xf2efe6,0xe6e0d0,0xd6cdb8,0xb8a888], roofPalette:[0x3a3228,0x241f18,0x4a4438], accentColor:0xffffff, parkSize:1.6, blockCount:4, treeDensity:1.6, carPalette:[0x161618,0xd8d8dc,0x8a1c24,0x1c3a5a], graffiti:false },
+  industrial:   { heightRange:[6,13],  wallPalette:[0x8a8078,0x6e645a,0x9c3a2e,0x74716b,0x4a4a52], roofPalette:[0x2e3238,0x3a2020,0x1e2226], accentColor:0xe8c94a, parkSize:0.55, blockCount:5, treeDensity:0.3, carPalette:[0x4a5560,0xb8321c,0x6b6b6b], graffiti:true },
+  comercial:    { heightRange:[6,16],  wallPalette:[0xd8dce2,0xb8c4cc,0x8a9aa4,0xe8ecf0,0x5c6e78], roofPalette:[0x2e343a,0x24282c], accentColor:0xff3d7a, parkSize:0.85, blockCount:5, treeDensity:0.9, carPalette:[0xd63d3d,0x3d8bff,0xffe138,0xd8d2c2,0x1a1a20], graffiti:false },
+  residencialMedio: { heightRange:[3,6], wallPalette:[0xc8a878,0xb08c5c,0xe8ddc4,0xd6cab0,0x8a6f52], roofPalette:[0x8c3a28,0x6e2c1e,0x9c4530], accentColor:0xe6c65c, parkSize:1.4, blockCount:5, treeDensity:1.2, carPalette:[0xd8d2c2,0x3d5aff,0x6b6b6b,0x8a1c24], graffiti:false },
+  financiero:   { heightRange:[16,40], wallPalette:[0x9ab0c0,0xb8c8d4,0x7c8c98,0xd8e0e6,0x3c4450], roofPalette:[0x24282c,0x1c1e22], accentColor:0x4ad6ff, parkSize:0.7, blockCount:4, treeDensity:0.9, carPalette:[0x161618,0xffd700,0xd8d8dc], graffiti:false },
 };
 
 /* ============================================================
@@ -972,16 +985,23 @@ const BUILDING_TYPES = {
   hotel:           {name:'Hotel',            archetype:'large',  income:20, color:0xd6a44a, furn:'home'},
   estacionamiento: {name:'Estacionamiento',  archetype:'medium', income:3,  color:0x555560, furn:'industrial'},
   centroComercial: {name:'Centro Comercial', archetype:'huge',   income:30, color:0xffb84d, furn:'shop'},
+  cafeteria:       {name:'Cafetería',        archetype:'small',  income:3,  color:0x8a6238, furn:'dine'},
+  gasolinera:      {name:'Estación de Servicio', archetype:'small', income:5, color:0xd63d3d, furn:'industrial'},
+  cine:            {name:'Cine',             archetype:'large',  income:15, color:0x9a2ea8, furn:'shop'},
+  farmacia:        {name:'Farmacia',         archetype:'small',  income:4,  color:0x3ddc84, furn:'shop'},
+  panaderia:       {name:'Panadería',        archetype:'small',  income:3,  color:0xd6a44a, furn:'dine'},
+  centroComunitario:{name:'Centro Comunitario', archetype:'medium', income:5, color:0xe6c65c, furn:'office'},
+  municipalidad:   {name:'Municipalidad',    archetype:'huge',   income:26, color:0xe8ecf0, furn:'office'},
 };
 // Which building types can appear in each district identity — matches the
-// district's own theme (see DISTRICT_IDENTITY).
+// district's own theme (see DISTRICT_IDENTITY) and the brief's per-barrio list.
 const DISTRICT_BUILDING_POOL = {
-  plaza:       ['tienda','restaurante','oficina'], // home district: decorative only, never conquerable
-  torres:      ['oficina','departamento','banco','hotel','estacionamiento'],
-  residencial: ['casa','departamento','tienda','gimnasio','escuela'],
-  comercial:   ['tienda','supermercado','restaurante','banco','centroComercial','estacionamiento'],
-  mercado:     ['tienda','restaurante','taller','supermercado','comisaria'],
-  fortaleza:   ['galpon','fabrica','taller','comisaria','estacionamiento'],
+  plaza:            ['tienda','restaurante','oficina','cafeteria'], // home district: decorative only, never conquerable
+  residencialAlto:  ['casa','departamento','cafeteria','restaurante','gimnasio','oficina','banco'],
+  industrial:       ['galpon','fabrica','taller','estacionamiento','gasolinera','casa'],
+  comercial:        ['tienda','supermercado','hotel','restaurante','cine','centroComercial','estacionamiento'],
+  residencialMedio: ['casa','escuela','tienda','farmacia','panaderia','centroComunitario'],
+  financiero:       ['banco','oficina','hotel','centroComercial','restaurante','municipalidad'],
 };
 const FURNITURE_SETS = {
   home:       ['bed','sofa','table','shelf'],
@@ -1063,6 +1083,228 @@ function makeLamp(){
   head.position.y=3.2; g.add(head);
   return g;
 }
+
+/* ---------- extra street furniture / city-life props: what actually makes
+   a district feel like a real street instead of a field of boxes. All
+   simple low-poly primitives, matching the game's existing style. ---------- */
+function makeTrashBin(){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(.22,.18,.55,10), new THREE.MeshStandardMaterial({color:0x2e3a2e, metalness:.3, roughness:.7}));
+  body.position.y=.28; g.add(body);
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(.24,.24,.06,10), new THREE.MeshStandardMaterial({color:0x1e261e}));
+  lid.position.y=.58; g.add(lid);
+  return g;
+}
+function makeTrafficLight(){
+  const g = new THREE.Group();
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,3.4,6), new THREE.MeshStandardMaterial({color:0x1e1e22}));
+  post.position.y=1.7; g.add(post);
+  const box = new THREE.Mesh(new THREE.BoxGeometry(.35,.9,.3), new THREE.MeshStandardMaterial({color:0x161616}));
+  box.position.set(0,3.1,0); g.add(box);
+  const lights = [[0xff3d3d,.25],[0xffd23d,0],[0x3ddc84,-.25]];
+  lights.forEach(([c,oy])=>{
+    const l = new THREE.Mesh(new THREE.SphereGeometry(.09,8,8), new THREE.MeshStandardMaterial({color:c, emissive:c, emissiveIntensity:.5}));
+    l.position.set(0,3.1+oy,.17); g.add(l);
+  });
+  return g;
+}
+function makeStreetSign(text){
+  const g = new THREE.Group();
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,2.4,6), new THREE.MeshStandardMaterial({color:0x3a3a3e}));
+  post.position.y=1.2; g.add(post);
+  const c = document.createElement('canvas');
+  c.width=256; c.height=64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle='#1c4a2e'; ctx.fillRect(0,0,256,64);
+  ctx.strokeStyle='#fff'; ctx.lineWidth=4; ctx.strokeRect(4,4,248,56);
+  ctx.fillStyle='#fff'; ctx.font='bold 28px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.6,.4), new THREE.MeshBasicMaterial({map:tex}));
+  plate.position.set(0,2.15,0.02); g.add(plate);
+  return g;
+}
+/* A parked, non-driveable decorative car — color varies per district (see
+   DISTRICT_IDENTITY.carPalette) so a street doesn't look like a car
+   dealership of one single tint. */
+function makeParkedCar(bodyColor){
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({color:bodyColor, roughness:.35, metalness:.5});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.7,.55,3.8), paint);
+  body.position.y=.5; body.castShadow=true; g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.45,.5,2.0), paint);
+  cabin.position.set(0,.98,-.1); cabin.castShadow=true; g.add(cabin);
+  const glassMat = new THREE.MeshStandardMaterial({color:0x1c2830, roughness:.2, metalness:.4});
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.35,.32,1.85), glassMat);
+  glass.position.set(0,1.12,-.1); g.add(glass);
+  const wheelMat = new THREE.MeshStandardMaterial({color:0x0e0e0e});
+  [[-.82,.3,1.25],[.82,.3,1.25],[-.82,.3,-1.25],[.82,.3,-1.25]].forEach(([x,y,z])=>{
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.3,.3,.22,10), wheelMat);
+    wheel.rotation.x=Math.PI/2; wheel.position.set(x,y,z); g.add(wheel);
+  });
+  return g;
+}
+function makeFountain(){
+  const g = new THREE.Group();
+  const basin = new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.4,.5,20), new THREE.MeshStandardMaterial({color:0xbfc4c8, roughness:.6}));
+  basin.position.y=.25; basin.castShadow=true; basin.receiveShadow=true; g.add(basin);
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(2.0,2.0,.06,20), new THREE.MeshStandardMaterial({color:0x4aa0d8, transparent:true, opacity:.75, metalness:.3, roughness:.1}));
+  water.position.y=.52; g.add(water);
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(.4,.5,1.4,10), new THREE.MeshStandardMaterial({color:0xd8d2c2}));
+  pedestal.position.y=1.0; g.add(pedestal);
+  const spout = new THREE.Mesh(new THREE.SphereGeometry(.35,10,10), new THREE.MeshStandardMaterial({color:0xd8d2c2}));
+  spout.position.y=1.75; g.add(spout);
+  return g;
+}
+function makeMonument(){
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2.6,.6,2.6), new THREE.MeshStandardMaterial({color:0x8a8078, roughness:.8}));
+  base.position.y=.3; base.castShadow=true; g.add(base);
+  const pedestal = new THREE.Mesh(new THREE.BoxGeometry(1.4,1.4,1.4), new THREE.MeshStandardMaterial({color:0xa8a094, roughness:.7}));
+  pedestal.position.y=1.3; pedestal.castShadow=true; g.add(pedestal);
+  const statue = new THREE.Mesh(new THREE.ConeGeometry(.7,3.2,6), new THREE.MeshStandardMaterial({color:0x6b8a7a, metalness:.4, roughness:.5}));
+  statue.position.y=3.6; statue.castShadow=true; g.add(statue);
+  return g;
+}
+/* A static digital billboard — no animation, just a bright canvas-generated
+   ad, since a fully animated ticker would be a lot of extra render cost for
+   an arcade-scale scene. */
+function makeBillboard(text, glowColor){
+  const g = new THREE.Group();
+  const legMat = new THREE.MeshStandardMaterial({color:0x2a2a2e});
+  [[-1.7,0],[1.7,0]].forEach(([x])=>{
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,4.2,6), legMat);
+    leg.position.set(x,2.1,0); g.add(leg);
+  });
+  const c = document.createElement('canvas');
+  c.width=512; c.height=192;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,512,192);
+  const glow = '#'+new THREE.Color(glowColor).getHexString();
+  grad.addColorStop(0,'#0a0a12'); grad.addColorStop(1,glow);
+  ctx.fillStyle=grad; ctx.fillRect(0,0,512,192);
+  ctx.fillStyle='#fff'; ctx.font='bold 46px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, 256, 96);
+  const tex = new THREE.CanvasTexture(c);
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(4.2,1.6), new THREE.MeshBasicMaterial({map:tex}));
+  panel.position.set(0,4.2,0.05); g.add(panel);
+  const panelBack = panel.clone(); panelBack.rotation.y=Math.PI; panelBack.position.z=-0.05; g.add(panelBack);
+  return g;
+}
+function makeContainer(color){
+  const g = new THREE.Group();
+  const box = new THREE.Mesh(new THREE.BoxGeometry(2.4,2.4,6), new THREE.MeshStandardMaterial({color, roughness:.75, metalness:.25}));
+  box.position.y=1.2; box.castShadow=true; box.receiveShadow=true; g.add(box);
+  for(let i=-1;i<=1;i++){
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(2.42,2.4,.08), new THREE.MeshStandardMaterial({color:shadeColor(color,-0.2)}));
+    rib.position.set(0,1.2,i*2); g.add(rib);
+  }
+  return g;
+}
+function makeChimney(){
+  const g = new THREE.Group();
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(.6,.8,7,10), new THREE.MeshStandardMaterial({color:0x6e645a, roughness:.9}));
+  stack.position.y=3.5; stack.castShadow=true; g.add(stack);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(.85,.85,.3,10), new THREE.MeshStandardMaterial({color:0x8a1c1c}));
+  band.position.y=6.7; g.add(band);
+  return g;
+}
+/* A short straight rail spur — purely decorative scenery marking the
+   industrial district's edge, not a real transit line. */
+function makeTrainTrack(length){
+  const g = new THREE.Group();
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(3.2,.15,length), new THREE.MeshStandardMaterial({color:0x4a453e, roughness:1}));
+  bed.position.y=.08; bed.receiveShadow=true; g.add(bed);
+  const railMat = new THREE.MeshStandardMaterial({color:0x8a8a90, metalness:.6, roughness:.4});
+  [-1.1,1.1].forEach(rx=>{
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(.12,.12,length), railMat);
+    rail.position.set(rx,.2,0); g.add(rail);
+  });
+  const tieMat = new THREE.MeshStandardMaterial({color:0x3a2c1e, roughness:.9});
+  for(let z=-length/2+1; z<length/2; z+=1.6){
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(2.8,.12,.5), tieMat);
+    tie.position.set(0,.1,z); g.add(tie);
+  }
+  return g;
+}
+function makeFlowerBed(){
+  const g = new THREE.Group();
+  const soil = new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.0,.25,14), new THREE.MeshStandardMaterial({color:0x3a2c1e, roughness:1}));
+  soil.position.y=.12; g.add(soil);
+  const flowerColors = [0xe63946,0xffd23d,0xff8fc7,0xffffff];
+  for(let i=0;i<9;i++){
+    const a=Math.random()*Math.PI*2, r=Math.random()*.75;
+    const flower = new THREE.Mesh(new THREE.SphereGeometry(.13,6,6), new THREE.MeshStandardMaterial({color:flowerColors[i%flowerColors.length]}));
+    flower.position.set(Math.cos(a)*r,.32,Math.sin(a)*r); g.add(flower);
+  }
+  return g;
+}
+function makeSportsCourt(){
+  const g = new THREE.Group();
+  const c = document.createElement('canvas');
+  c.width=256; c.height=128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle='#3a6b8a'; ctx.fillRect(0,0,256,128);
+  ctx.strokeStyle='#fff'; ctx.lineWidth=4;
+  ctx.strokeRect(8,8,240,112);
+  ctx.beginPath(); ctx.moveTo(128,8); ctx.lineTo(128,120); ctx.stroke();
+  ctx.beginPath(); ctx.arc(128,64,22,0,Math.PI*2); ctx.stroke();
+  const tex = new THREE.CanvasTexture(c);
+  const court = new THREE.Mesh(new THREE.PlaneGeometry(11,6), new THREE.MeshStandardMaterial({map:tex, roughness:.9}));
+  court.rotation.x=-Math.PI/2; court.position.y=0.03; court.receiveShadow=true; g.add(court);
+  const poleMat = new THREE.MeshStandardMaterial({color:0x2a2a2e});
+  [-5.2,5.2].forEach(px=>{
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,2.6,6), poleMat);
+    pole.position.set(px,1.3,0); g.add(pole);
+    const backboard = new THREE.Mesh(new THREE.BoxGeometry(.1,1,1.3), new THREE.MeshStandardMaterial({color:0xffffff}));
+    backboard.position.set(px*0.96,2.3,0); g.add(backboard);
+  });
+  return g;
+}
+/* A small chapel landmark for Barrio Oeste — decorative only (not a
+   conquerable BUILDING_TYPES entry), same footing as the home district's
+   plain decorative boxes. */
+function makeChurchLandmark(){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(6,5,10), new THREE.MeshStandardMaterial({color:0xe8ddc4, roughness:.85}));
+  body.position.y=2.5; body.castShadow=true; body.receiveShadow=true; g.add(body);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(4.6,2.2,4), new THREE.MeshStandardMaterial({color:0x8c3a28}));
+  roof.position.y=6.1; roof.rotation.y=Math.PI/4; roof.castShadow=true; g.add(roof);
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(2,7,2), new THREE.MeshStandardMaterial({color:0xe8ddc4, roughness:.85}));
+  tower.position.set(0,3.5,5.4); tower.castShadow=true; g.add(tower);
+  const spire = new THREE.Mesh(new THREE.ConeGeometry(1.5,2.4,4), new THREE.MeshStandardMaterial({color:0x8c3a28}));
+  spire.position.set(0,8.2,5.4); spire.rotation.y=Math.PI/4; g.add(spire);
+  const crossMat = new THREE.MeshStandardMaterial({color:0xffd700, metalness:.5});
+  const crossV = new THREE.Mesh(new THREE.BoxGeometry(.15,.9,.15), crossMat);
+  crossV.position.set(0,9.7,5.4); g.add(crossV);
+  const crossH = new THREE.Mesh(new THREE.BoxGeometry(.55,.15,.15), crossMat);
+  crossH.position.set(0,9.9,5.4); g.add(crossH);
+  return g;
+}
+/* Random graffiti tag — only ever used in Barrio Sur (see DISTRICT_IDENTITY
+   industrial.graffiti), applied as a decal-like plane on a building's side
+   wall, so the rest of the city stays clean per "evitando que toda la
+   ciudad tenga el mismo estilo". */
+function makeGraffitiPlane(w,h,seedRand){
+  const c = document.createElement('canvas');
+  c.width=256; c.height=160;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,256,160);
+  const tagColors = ['#ff3d7a','#3ddc84','#ffd23d','#4ad6ff','#ff8c3d'];
+  for(let i=0;i<4;i++){
+    ctx.strokeStyle = tagColors[Math.floor(seedRand()*tagColors.length)];
+    ctx.lineWidth = 5+seedRand()*6;
+    ctx.beginPath();
+    let x=seedRand()*256, y=seedRand()*160;
+    ctx.moveTo(x,y);
+    for(let s=0;s<4;s++){ x+=(seedRand()-.5)*90; y+=(seedRand()-.5)*70; ctx.lineTo(Math.max(0,Math.min(256,x)),Math.max(0,Math.min(160,y))); }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:.85}));
+  return mesh;
+}
+
 /* ---------- indoor furniture (used by buildInterior, one per FURNITURE_SETS entry) ---------- */
 function makeBed(){
   const g = new THREE.Group();
@@ -1249,11 +1491,12 @@ function buildTransitStations(){
 }
 
 /* ---------- district park + building generation (the streamed "detail" layer) ---------- */
-function addParkZone(barrio, cx, cz, r, rand){
+function addParkZone(barrio, cx, cz, r, rand, identity){
+  const density = identity ? identity.treeDensity : 1;
   const grass = new THREE.Mesh(new THREE.CircleGeometry(r,20), new THREE.MeshStandardMaterial({color:0x3a6b3a, roughness:1}));
   grass.rotation.x=-Math.PI/2; grass.position.set(cx,0.02,cz);
   barrio.detailGroup.add(grass);
-  const treeCount = 6+Math.floor(rand()*5);
+  const treeCount = Math.round((6+Math.floor(rand()*5))*density);
   for(let i=0;i<treeCount;i++){
     const a=rand()*Math.PI*2, dist=rand()*r*0.85;
     const tree = makeTree();
@@ -1266,6 +1509,17 @@ function addParkZone(barrio, cx, cz, r, rand){
     bench.position.set(cx+Math.cos(a)*r*0.55, 0, cz+Math.sin(a)*r*0.55);
     bench.rotation.y = a;
     barrio.detailGroup.add(bench);
+  }
+  // A couple of flowerbeds in leafier districts (Norte/Oeste per the brief);
+  // industrial/financiero identities keep their tree density low, so this
+  // naturally stays rare there without extra branching.
+  if(identity && identity.treeDensity>=1.2){
+    for(let i=0;i<2;i++){
+      const a=rand()*Math.PI*2;
+      const bed = makeFlowerBed();
+      bed.position.set(cx+Math.cos(a)*r*0.4, 0, cz+Math.sin(a)*r*0.4);
+      barrio.detailGroup.add(bed);
+    }
   }
 }
 
@@ -1290,20 +1544,32 @@ function buildBarrioDetail(barrio){
   const parkCX = barrio.x+Math.cos(parkAngle)*parkDist;
   const parkCZ = barrio.z+Math.sin(parkAngle)*parkDist;
   const parkR = Math.max(8, half*0.32*identity.parkSize);
-  addParkZone(barrio, parkCX, parkCZ, parkR, rand);
+  addParkZone(barrio, parkCX, parkCZ, parkR, rand, identity);
 
-  // lamp posts ringing the central plaza, plus along the two cross-streets
+  // lamp posts ringing the central plaza, plus a traffic light at each of
+  // the four plaza corners (real intersections, not just decoration)
   for(let i=0;i<6;i++){
     const a=(i/6)*Math.PI*2;
     const lamp = makeLamp();
     lamp.position.set(barrio.x+Math.cos(a)*(plazaR+2.5), 0, barrio.z+Math.sin(a)*(plazaR+2.5));
     barrio.detailGroup.add(lamp);
   }
+  [Math.PI/4, Math.PI*3/4, Math.PI*5/4, Math.PI*7/4].forEach(a=>{
+    const tl = makeTrafficLight();
+    tl.position.set(barrio.x+Math.cos(a)*(plazaR+4), 0, barrio.z+Math.sin(a)*(plazaR+4));
+    tl.rotation.y = a;
+    barrio.detailGroup.add(tl);
+  });
   for(let d=plazaR+12; d<half; d+=18){
     [[d,0],[-d,0],[0,d],[0,-d]].forEach(([ox,oz])=>{
       const lamp = makeLamp();
       lamp.position.set(barrio.x+ox, 0, barrio.z+oz);
       barrio.detailGroup.add(lamp);
+      if(rand()<0.3){
+        const bin = makeTrashBin();
+        bin.position.set(barrio.x+ox+1.1, 0, barrio.z+oz+1.1);
+        barrio.detailGroup.add(bin);
+      }
     });
   }
 
@@ -1334,17 +1600,23 @@ function buildBarrioDetail(barrio){
       }
       if(!ok) continue;
       placed.push({x,z,hw,hd});
-      const col = identity.palette[Math.floor(rand()*identity.palette.length)];
+      const col = identity.wallPalette[Math.floor(rand()*identity.wallPalette.length)];
+      const roofCol = identity.roofPalette[Math.floor(rand()*identity.roofPalette.length)];
       const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color:col, roughness:.85}));
       bMesh.position.set(x,h/2,z);
       bMesh.castShadow=true; bMesh.receiveShadow=true;
       barrio.detailGroup.add(bMesh);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(w*.7,.6,d*.7), new THREE.MeshStandardMaterial({color:0x201d18}));
+      const plinthH = Math.min(1.1, h*0.2);
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(w+.14,plinthH,d+.14), new THREE.MeshStandardMaterial({color:shadeColor(roofCol,-0.1), roughness:.9}));
+      plinth.position.set(x, plinthH/2, z);
+      barrio.detailGroup.add(plinth);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(w*.7,.6,d*.7), new THREE.MeshStandardMaterial({color:roofCol}));
       roof.position.set(x,h+.3,z); roof.castShadow=true;
       barrio.detailGroup.add(roof);
       barrio.buildingAABBs.push({minX:x-w/2-.4, maxX:x+w/2+.4, minZ:z-d/2-.4, maxZ:z+d/2+.4});
       barrio.buildingMeshes.push(bMesh);
     }
+    scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, placed);
     return;
   }
 
@@ -1356,6 +1628,157 @@ function buildBarrioDetail(barrio){
     barrio.buildings = generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, parkR);
   }
   barrio.buildings.forEach(b=>instantiateBuildingMesh(b));
+  const occupied = barrio.buildings.map(b=>({x:b.x, z:b.z, hw:b.w/2+1, hd:b.d/2+1}));
+  scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, occupied);
+  scatterDistrictLandmarks(barrio, rand, half, identity);
+}
+
+/* Scatters the "living city" layer common to every district: parked cars
+   near buildings/streets (rejection-sampled against whatever's already
+   occupied, same trick as building placement, so nothing spawns clipped
+   into a wall) and wandering pedestrian NPCs. Called once per district
+   build — the pedestrians it creates are the only part with a per-frame
+   cost afterward (see updatePedestrians), and only while the district is
+   actually streamed in. */
+function scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, occupied){
+  occupied = occupied || [];
+  const carCount = 5 + Math.floor(rand()*4);
+  for(let n=0;n<carCount;n++){
+    let ok=false, x=0, z=0;
+    for(let tries=0; tries<16 && !ok; tries++){
+      x = barrio.x + (rand()*2-1)*half;
+      z = barrio.z + (rand()*2-1)*half;
+      if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+3) continue;
+      if(Math.hypot(x-parkCX,z-parkCZ) < parkR+3) continue;
+      ok = true;
+      for(let i=0;i<occupied.length && ok;i++){
+        const p = occupied[i];
+        if(Math.abs(x-p.x) < p.hw+1.2 && Math.abs(z-p.z) < p.hd+2.2) ok=false;
+      }
+    }
+    if(!ok) continue;
+    const car = makeParkedCar(identity.carPalette[Math.floor(rand()*identity.carPalette.length)]);
+    car.rotation.y = Math.floor(rand()*4)*(Math.PI/2) + (rand()-.5)*0.15;
+    car.position.set(x,0,z);
+    barrio.detailGroup.add(car);
+  }
+
+  // Foot traffic varies by district character: the financial/commercial
+  // districts feel busy, the industrial district feels comparatively empty.
+  const PED_DENSITY = { plaza:1, residencialAlto:1, industrial:0.4, comercial:1.7, residencialMedio:0.9, financiero:1.8 };
+  const density = PED_DENSITY[barrio.layout] || 1;
+  const pedCount = Math.round((4+rand()*3)*density);
+  spawnPedestrians(barrio, rand, pedCount, plazaR);
+}
+
+/* District-specific landmark scenery — the parts of the brief that belong
+   to ONE particular barrio's character (chimneys/containers/rail spur +
+   graffiti for Sur, fountain/monument/billboards for Central,
+   church/sports court for Oeste) rather than every district alike. */
+function scatterDistrictLandmarks(barrio, rand, half, identity){
+  if(barrio.layout==='industrial'){
+    const edgeA = rand()*Math.PI*2;
+    const ex = barrio.x+Math.cos(edgeA)*half*0.85, ez = barrio.z+Math.sin(edgeA)*half*0.85;
+    const track = makeTrainTrack(half*0.9);
+    track.rotation.y = edgeA+Math.PI/2;
+    track.position.set(ex,0,ez);
+    barrio.detailGroup.add(track);
+    for(let i=0;i<3;i++){
+      const a=rand()*Math.PI*2, d=half*(0.3+rand()*0.4);
+      const stack = makeChimney();
+      stack.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
+      barrio.detailGroup.add(stack);
+    }
+    const containerColors = [0xb8321c,0x3d5aff,0x3ddc84,0xe6c65c];
+    for(let i=0;i<5;i++){
+      const a=rand()*Math.PI*2, d=half*(0.2+rand()*0.6);
+      const cont = makeContainer(containerColors[Math.floor(rand()*containerColors.length)]);
+      cont.rotation.y = rand()*Math.PI*2;
+      cont.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
+      barrio.detailGroup.add(cont);
+    }
+    // Graffiti tags on a handful of building side walls — only here, per
+    // "evitando que toda la ciudad tenga el mismo estilo".
+    if(identity.graffiti && barrio.buildings){
+      barrio.buildings.forEach(b=>{
+        if(rand()<0.3){
+          const tag = makeGraffitiPlane(Math.min(b.d*0.7,4), Math.min(b.h*0.5,2.6), rand);
+          tag.position.set(b.x-b.w/2-0.03, b.h*0.3, b.z);
+          tag.rotation.y = -Math.PI/2;
+          barrio.detailGroup.add(tag);
+        }
+      });
+    }
+  } else if(barrio.layout==='financiero'){
+    const fountain = makeFountain();
+    fountain.position.set(barrio.x, 0, barrio.z);
+    barrio.detailGroup.add(fountain);
+    const monA = Math.PI*0.5;
+    const monument = makeMonument();
+    monument.position.set(barrio.x+Math.cos(monA)*(half*0.45), 0, barrio.z+Math.sin(monA)*(half*0.45));
+    barrio.detailGroup.add(monument);
+    const billboardTexts = ['GLORIOSO S.A.','BANCO CENTRAL','INVERTÍ HOY'];
+    for(let i=0;i<2;i++){
+      const a=rand()*Math.PI*2, d=half*0.7;
+      const bb = makeBillboard(billboardTexts[i%billboardTexts.length], identity.accentColor);
+      bb.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
+      bb.rotation.y = a+Math.PI;
+      barrio.detailGroup.add(bb);
+    }
+  } else if(barrio.layout==='residencialMedio'){
+    const church = makeChurchLandmark();
+    const cA = rand()*Math.PI*2, cD = half*0.55;
+    church.position.set(barrio.x+Math.cos(cA)*cD, 0, barrio.z+Math.sin(cA)*cD);
+    church.rotation.y = cA+Math.PI;
+    barrio.detailGroup.add(church);
+    const court = makeSportsCourt();
+    const sA = cA+Math.PI*0.6, sD = half*0.5;
+    court.position.set(barrio.x+Math.cos(sA)*sD, 0, barrio.z+Math.sin(sA)*sD);
+    court.rotation.y = rand()*Math.PI*2;
+    barrio.detailGroup.add(court);
+  }
+}
+
+/* Cosmetic wandering pedestrians — pure "the city feels alive" set dressing,
+   same lightweight pattern as the ally patrol NPCs added for district
+   control: no detect/attack/hp, just a slow random-waypoint wander, so they
+   stay cheap and never touch the enemy/projectile/collision code. Tracked
+   per-barrio (not globally) so unbuildBarrioDetail can clear exactly this
+   district's pedestrians when its detail streams out. */
+function spawnPedestrians(barrio, rand, count, plazaR){
+  for(let i=0;i<count;i++){
+    const group = new THREE.Group();
+    const shirtColors = [0x3d5aff,0xe63946,0x3ddc84,0xe8c94a,0x8a5aa8,0xd8d2c2,0x2a2a2e];
+    const shirt = shirtColors[Math.floor(rand()*shirtColors.length)];
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(.32,.75,4,8), new THREE.MeshStandardMaterial({color:shirt, roughness:.7}));
+    body.position.y=.85; body.castShadow=true; group.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(.22,10,10), new THREE.MeshStandardMaterial({color:0xE0A878}));
+    head.position.y=1.42; group.add(head);
+    const a = rand()*Math.PI*2, r = plazaR+rand()*20;
+    group.position.set(barrio.x+Math.cos(a)*r, 0, barrio.z+Math.sin(a)*r);
+    barrio.detailGroup.add(group);
+    barrio.pedestrians.push({
+      group, center:{x:barrio.x,z:barrio.z}, radius:plazaR+22,
+      waypoint:{x:group.position.x,z:group.position.z}, speed:0.9+rand()*0.7,
+    });
+  }
+}
+function updatePedestrians(dt){
+  G.barrios.forEach(barrio=>{
+    if(!barrio.detailBuilt) return;
+    barrio.pedestrians.forEach(p=>{
+      const dx=p.waypoint.x-p.group.position.x, dz=p.waypoint.z-p.group.position.z;
+      const d=Math.hypot(dx,dz);
+      if(d<1){
+        const ang=Math.random()*Math.PI*2, rad=Math.random()*p.radius;
+        p.waypoint={x:p.center.x+Math.cos(ang)*rad, z:p.center.z+Math.sin(ang)*rad};
+      } else {
+        p.group.position.x += dx/d*p.speed*dt;
+        p.group.position.z += dz/d*p.speed*dt;
+        p.group.rotation.y = Math.atan2(dx,dz);
+      }
+    });
+  });
 }
 
 /* Picks positions/types/footprints for every conquerable building in a
@@ -1403,18 +1826,75 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
   return buildings;
 }
 
+/* Generates a small grid-of-windows texture (some lit, most dark) for a
+   building facade — cheap way to break up a flat color block into something
+   that reads as glass/masonry instead of a solid painted box. glowColor is
+   the district's accent (warm incandescent for homes, cool LED for the
+   financial district, neon for the commercial strip, etc). */
+function makeWindowGridTexture(cols, rows, glowColor){
+  const cw=28, ch=28;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1,cols)*cw; c.height = Math.max(1,rows)*ch;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#26262c'; ctx.fillRect(0,0,c.width,c.height);
+  const glow = '#'+new THREE.Color(glowColor).getHexString();
+  for(let r=0;r<rows;r++){
+    for(let cI=0;cI<cols;cI++){
+      const lit = Math.random()<0.4;
+      ctx.fillStyle = lit ? glow : (Math.random()<0.5?'#3a4650':'#2c343c');
+      ctx.fillRect(cI*cw+4, r*ch+4, cw-8, ch-9);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+
 /* (Re)creates a conquerable building's exterior mesh/roof/AABB from its
    persistent state — used on first placement AND every time streaming
-   rebuilds the district, so ownership always shows the right color. */
+   rebuilds the district, so ownership always shows the right color.
+   Facades are assembled from several parts (plinth + main wall + windows +
+   roof, each independently colored) instead of one flat-painted box, so a
+   whole district never reads as a single solid color — see DISTRICT_IDENTITY's
+   wallPalette/roofPalette/accentColor, picked per-building from a seed so the
+   mix is stable across streaming rebuilds but varies building to building. */
 function instantiateBuildingMesh(b){
   const type = BUILDING_TYPES[b.type];
-  const col = b.owned ? 0xffd700 : type.color;
-  const bMesh = new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,b.d), new THREE.MeshStandardMaterial({color:col, roughness:.8}));
+  const identity = DISTRICT_IDENTITY[b.barrio.layout] || DISTRICT_IDENTITY.plaza;
+  const matRand = makeSeededRandom(hashString(b.id+'_mat'));
+  const wallCol = b.owned ? 0xffd700 : identity.wallPalette[Math.floor(matRand()*identity.wallPalette.length)];
+  const roofCol = b.owned ? 0xb8960a : identity.roofPalette[Math.floor(matRand()*identity.roofPalette.length)];
+  const col = b.owned ? 0xffd700 : type.color; // kept as the type's own "brand" accent — sign, emblem, trim
+
+  const bMesh = new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,b.d), new THREE.MeshStandardMaterial({color:wallCol, roughness:.82}));
   bMesh.position.set(b.x,b.h/2,b.z);
   bMesh.castShadow=true; bMesh.receiveShadow=true;
   bMesh.userData.building = b;
   b.barrio.detailGroup.add(bMesh);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w*.75,.5,b.d*.75), new THREE.MeshStandardMaterial({color:0x1c1a16}));
+
+  // Plinth: a slightly wider, darker concrete base band grounding the
+  // building — real facades almost never run one flat color to the ground.
+  const plinthH = Math.min(1.1, b.h*0.18);
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(b.w+.16,plinthH,b.d+.16), new THREE.MeshStandardMaterial({color:shadeColor(roofCol,-0.1), roughness:.9}));
+  plinth.position.set(b.x, plinthH/2, b.z);
+  plinth.receiveShadow=true;
+  b.barrio.detailGroup.add(plinth);
+
+  // Window grid on the two long faces, for anything with more than one
+  // floor's worth of height — reads as glass/openings instead of a slab.
+  if(b.h>5.5){
+    const cols = Math.max(2, Math.round(b.w/2.6));
+    const rows = Math.max(1, Math.round((b.h-plinthH)/3.1));
+    const winTex = makeWindowGridTexture(cols, rows, identity.accentColor);
+    const winMat = new THREE.MeshBasicMaterial({map:winTex});
+    const frontWin = new THREE.Mesh(new THREE.PlaneGeometry(b.w*0.92, (b.h-plinthH)*0.82), winMat);
+    frontWin.position.set(b.x, plinthH+(b.h-plinthH)*0.5, b.z+b.d/2+0.03);
+    b.barrio.detailGroup.add(frontWin);
+    const backWin = frontWin.clone();
+    backWin.position.z = b.z-b.d/2-0.03; backWin.rotation.y = Math.PI;
+    b.barrio.detailGroup.add(backWin);
+  }
+
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w*.75,.5,b.d*.75), new THREE.MeshStandardMaterial({color:roofCol}));
   roof.position.set(b.x,b.h+.25,b.z); roof.castShadow=true;
   b.barrio.detailGroup.add(roof);
   // door (visual): a dark inset on the south wall, at ground level
@@ -1763,6 +2243,7 @@ function unbuildBarrioDetail(barrio){
   while(barrio.detailGroup.children.length) barrio.detailGroup.remove(barrio.detailGroup.children[0]);
   barrio.buildingAABBs.length = 0;
   barrio.buildingMeshes.length = 0;
+  barrio.pedestrians.length = 0; // meshes already disposed above (they lived in detailGroup)
   // Building OWNERSHIP/PROGRESS (barrio.buildings) is never cleared here —
   // only the mesh references, since those specific mesh instances were just
   // disposed above and get recreated fresh next time this district streams
@@ -3136,6 +3617,7 @@ function animate(){
       updateVehicle();
       updateEnemies(dt);
       updateAllies(dt);
+      updatePedestrians(dt);
       updateProjectiles(dt);
       updateEconomy(dt);
       updateWorldStreaming(dt);
