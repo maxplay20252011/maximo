@@ -411,14 +411,49 @@ function updateDeviceMode(){
   }
 }
 
+/* ============================================================
+   THIRD-PERSON CAMERA CONFIG
+   Everything about how the mouse/touch drag rotates the camera
+   around Fran lives here — tweak these numbers, nothing else.
+   ============================================================ */
+const CAMERA_CONFIG = {
+  // Sensitivity: how many radians the camera turns per pixel of mouse/touch
+  // movement. Raise for a faster/twitchier look, lower for a slower one.
+  sensitivityX: 0.0022,   // horizontal (yaw / left-right) sensitivity
+  sensitivityY: 0.0018,   // vertical   (pitch / up-down)  sensitivity
+
+  // Vertical look limits, in degrees, measured from the horizon.
+  // Clamped so the camera can never flip upside down over the player's head
+  // or under their feet.
+  pitchMinDeg: -80,
+  pitchMaxDeg: 80,
+
+  // Smoothing: each frame the camera eases toward the target angle instead
+  // of snapping to it instantly. Higher = snappier/less lag, lower = more
+  // "weighty"/cinematic. ~15-25 feels responsive without being jittery.
+  smoothing: 20,
+
+  // Distance from the player's pivot to the camera, and how close the
+  // camera is allowed to get when a wall pushes it in (collision).
+  distance: 7.5,
+  minDistance: 1.4,
+};
+// Pitch limits converted once to radians for use in the update loop.
+const CAMERA_PITCH_MIN = CAMERA_CONFIG.pitchMinDeg * Math.PI / 180;
+const CAMERA_PITCH_MAX = CAMERA_CONFIG.pitchMaxDeg * Math.PI / 180;
+
 /* ---------- Global state ---------- */
 const G = {
   scene:null, camera:null, renderer:null, clock:null,
   playing:false, menuState:'start', // start|none|pause|shop|gameover|victory
-  locked:false, soundOn:true, audioCtx:null,
-  camYaw:0, camPitch:.28, camDist:7.5,
+  locked:false, soundOn:true, audioCtx:null, pointerLockUnavailable:false,
+  // camYaw/camPitch are the SMOOTHED angles actually used to place the camera;
+  // camYawTarget/camPitchTarget are updated instantly by mouse/touch input and
+  // camYaw/camPitch ease toward them every frame (see updateCameraSmoothing).
+  camYaw:0, camPitch:.28, camYawTarget:0, camPitchTarget:.28, camDist:CAMERA_CONFIG.distance,
+  dragLook:{active:false, lastX:0, lastY:0},
   input:{f:0,b:0,l:0,r:0,run:false,jump:false,mouseDown:false,jx:0,jy:0},
-  player:null, enemies:[], projectiles:[], buildingAABBs:[],
+  player:null, enemies:[], projectiles:[], buildingAABBs:[], buildingMeshes:[],
   barrios:[], popups:[],
   startTime:0,
   orbitAngle:0
@@ -561,6 +596,7 @@ function initScene(){
       roof.position.set(bx,h+.3,bz); roof.castShadow=true;
       G.scene.add(roof);
       G.buildingAABBs.push({minX:bx-w/2-.4, maxX:bx+w/2+.4, minZ:bz-d/2-.4, maxZ:bz+d/2+.4});
+      G.buildingMeshes.push(bMesh); // kept for the camera-collision raycast (see updateFollowCamera)
     }
 
     G.barrios.push(barrio);
@@ -720,6 +756,20 @@ function shadeColor(hex,percent){
   return c.lerp(new THREE.Color(0xffffff), percent).getHex();
 }
 
+/* ---------- Camera rotation helper ----------
+   Applies a raw pixel-delta (from mouse movementX/Y, or from a touch/mouse
+   drag delta) to the camera's TARGET yaw/pitch, using the sensitivity from
+   CAMERA_CONFIG and clamping the vertical look to [pitchMinDeg, pitchMaxDeg].
+   The camera itself doesn't snap to this target instantly — see
+   updateCameraSmoothing(), which eases G.camYaw/G.camPitch toward it every
+   frame for a smooth, non-jittery feel. */
+function applyLookDelta(dx, dy, scale){
+  scale = scale || 1;
+  G.camYawTarget -= dx * CAMERA_CONFIG.sensitivityX * scale;
+  G.camPitchTarget -= dy * CAMERA_CONFIG.sensitivityY * scale;
+  G.camPitchTarget = Math.max(CAMERA_PITCH_MIN, Math.min(CAMERA_PITCH_MAX, G.camPitchTarget));
+}
+
 /* ============================================================
    INPUT
    ============================================================ */
@@ -750,26 +800,58 @@ function setupInput(){
       case 'ShiftLeft': case 'ShiftRight': G.input.run=false; break;
     }
   });
+  // --- Mouse-look: rotates the 3rd-person camera around the player ---
+  // Normal path (Pointer Lock engaged): the OS hides/captures the cursor and
+  // every raw mouse-delta rotates the camera, exactly like a typical FPS/TPS.
   window.addEventListener('mousemove', e=>{
-    if(!G.locked) return;
-    G.camYaw -= e.movementX*0.0022;
-    G.camPitch -= e.movementY*0.0018;
-    G.camPitch = Math.max(-0.15, Math.min(1.05, G.camPitch));
+    if(G.locked){
+      applyLookDelta(e.movementX, e.movementY);
+    } else if(G.dragLook.active){
+      // Fallback path (see startDragLookFallback below): Pointer Lock isn't
+      // available (e.g. the game is embedded in an iframe that blocks it),
+      // so instead we rotate the camera while the mouse button is held down
+      // and dragged, using the distance moved since the last frame.
+      applyLookDelta(e.clientX-G.dragLook.lastX, e.clientY-G.dragLook.lastY);
+      G.dragLook.lastX = e.clientX;
+      G.dragLook.lastY = e.clientY;
+    }
   });
   canvas.addEventListener('mousedown', e=>{
-    if(e.button===0 && G.locked && G.playing && G.menuState==='none'){ G.input.mouseDown=true; }
+    if(e.button!==0 || !G.playing || G.menuState!=='none') return;
+    G.input.mouseDown = true;
+    if(!G.locked){
+      // Either we've already determined Pointer Lock won't work, or this is
+      // the very first click — start drag-look immediately so the camera is
+      // always controllable even before/without Pointer Lock succeeding.
+      G.dragLook.active = true;
+      G.dragLook.lastX = e.clientX;
+      G.dragLook.lastY = e.clientY;
+    }
   });
-  window.addEventListener('mouseup', ()=>{ G.input.mouseDown=false; });
+  window.addEventListener('mouseup', ()=>{
+    G.input.mouseDown=false;
+    G.dragLook.active=false;
+  });
 
   document.addEventListener('pointerlockchange', ()=>{
     G.locked = document.pointerLockElement===canvas;
     document.getElementById('lockPrompt').classList.toggle('hidden', G.locked || !G.playing || G.menuState!=='none');
-    if(!G.locked && G.playing && G.menuState==='none'){
+    if(G.locked){ G.dragLook.active=false; } // real Pointer Lock took over, drop the drag fallback
+    if(!G.locked && G.playing && G.menuState==='none' && !G.pointerLockUnavailable){
       openPause();
     }
   });
   bindTap(document.getElementById('lockPrompt'), ()=>{
     safeRequestPointerLock(canvas);
+    // If Pointer Lock hasn't actually engaged shortly after asking for it,
+    // stop waiting on it (some embedded/iframe contexts silently refuse it)
+    // and make sure the "click to play" prompt never gets stuck on screen.
+    setTimeout(()=>{
+      if(!G.locked){
+        G.pointerLockUnavailable = true;
+        document.getElementById('lockPrompt').classList.add('hidden');
+      }
+    }, 600);
   });
 }
 
@@ -810,9 +892,9 @@ function setupTouchControls(){
       G.input.jy = dy/JOY_RADIUS;
     } else if(e.pointerId===lookId){
       const dx=e.clientX-lookLast.x, dy=e.clientY-lookLast.y;
-      G.camYaw -= dx*0.0032;
-      G.camPitch -= dy*0.0028;
-      G.camPitch = Math.max(-0.15, Math.min(1.05, G.camPitch));
+      // Touch drags cover less screen distance than a mouse swipe, so scale
+      // the same base sensitivity up a bit (feel free to tune this multiplier).
+      applyLookDelta(dx, dy, 1.45);
       lookLast = {x:e.clientX, y:e.clientY};
     }
   });
@@ -878,6 +960,25 @@ function updateOrbitCamera(dt){
   G.camera.lookAt(0,3,0);
 }
 
+// Reused every frame for the camera-vs-wall collision check below (avoids
+// allocating a new Raycaster/Vector3 60 times a second).
+const cameraCollisionRay = new THREE.Raycaster();
+const _camLookTarget = new THREE.Vector3();
+const _camToCam = new THREE.Vector3();
+
+/* Eases the camera's actual yaw/pitch toward the mouse/touch-driven target
+   angles instead of snapping to them, so the look feels smooth rather than
+   jittery. Uses shortest-path interpolation on yaw so the camera never spins
+   the "long way around" when crossing the -180°/180° boundary. Call this
+   once per frame, before updateFollowCamera(). */
+function updateCameraSmoothing(dt){
+  const t = Math.min(1, CAMERA_CONFIG.smoothing * dt);
+  let yawDiff = G.camYawTarget - G.camYaw;
+  yawDiff = ((yawDiff + Math.PI) % (Math.PI*2) + Math.PI*2) % (Math.PI*2) - Math.PI; // wrap to [-PI, PI]
+  G.camYaw += yawDiff * t;
+  G.camPitch += (G.camPitchTarget - G.camPitch) * t;
+}
+
 function updateFollowCamera(){
   const p = G.player.group.position;
   const yaw=G.camYaw, pitch=G.camPitch, dist=G.camDist;
@@ -885,8 +986,28 @@ function updateFollowCamera(){
   const offZ = Math.cos(yaw)*Math.cos(pitch)*dist;
   const offY = Math.sin(pitch)*dist + 2.6;
   let camX = p.x+offX, camY = p.y+offY, camZ = p.z+offZ;
-  // simple camera collision: keep min height
-  if(camY<0.6) camY=0.6;
+  if(camY<0.6) camY=0.6; // never let the camera dip below the ground
+
+  // --- Camera-vs-wall collision ---
+  // Cast a ray from the point the camera looks at (Fran's chest) out toward
+  // the desired camera position above. If a building sits in the way, pull
+  // the camera in front of it instead of letting it clip through the wall.
+  const lookTarget = _camLookTarget.set(p.x, p.y+1.35, p.z);
+  const toCam = _camToCam.set(camX,camY,camZ).sub(lookTarget);
+  const fullDist = toCam.length();
+  if(fullDist > 0.001 && G.buildingMeshes.length){
+    toCam.normalize();
+    cameraCollisionRay.set(lookTarget, toCam);
+    cameraCollisionRay.far = fullDist;
+    const hits = cameraCollisionRay.intersectObjects(G.buildingMeshes, false);
+    if(hits.length){
+      const safeDist = Math.max(CAMERA_CONFIG.minDistance, hits[0].distance - 0.35);
+      camX = lookTarget.x + toCam.x*safeDist;
+      camY = Math.max(0.6, lookTarget.y + toCam.y*safeDist);
+      camZ = lookTarget.z + toCam.z*safeDist;
+    }
+  }
+
   G.camera.position.set(camX,camY,camZ);
   G.camera.lookAt(p.x, p.y+1.35, p.z);
 }
@@ -1485,7 +1606,7 @@ function resetGame(){
   pl.group.position.set(0,0,10);
   pl.velY=0; pl.grounded=true;
 
-  G.camYaw=0; G.camPitch=.28;
+  G.camYaw=0; G.camPitch=.28; G.camYawTarget=0; G.camPitchTarget=.28;
   G.startTime = performance.now();
 
   document.getElementById('victoryScreen').classList.add('hidden');
@@ -1511,6 +1632,7 @@ function animate(){
       updateEnemies(dt);
       updateProjectiles(dt);
       updateEconomy(dt);
+      updateCameraSmoothing(dt);
       updateFollowCamera();
       updatePopups(dt);
       updateHUD();
