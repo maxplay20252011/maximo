@@ -121,6 +121,10 @@ body.touch-mode #touchControls{display:block;}
   background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.4);color:#fff;font-size:1.4rem;
   display:flex;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;user-select:none;}
 #jumpBtn:active{transform:scale(.9);background:rgba(255,255,255,.28);}
+#interactBtn{position:absolute;right:96px;bottom:118px;width:52px;height:52px;border-radius:50%;
+  background:rgba(255,215,0,.22);border:2px solid rgba(255,215,0,.55);color:#ffe98a;font-size:1.1rem;font-weight:900;
+  display:flex;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;user-select:none;}
+#interactBtn:active{transform:scale(.9);background:rgba(255,215,0,.4);}
 
 #portraitHint{position:fixed;top:0;left:0;right:0;z-index:60;display:none;align-items:center;justify-content:center;gap:10px;
   background:rgba(20,10,0,.92);color:#f2ecd8;text-align:center;padding:9px 16px;font-size:.8rem;cursor:pointer;touch-action:manipulation;
@@ -163,6 +167,24 @@ body.touch-mode.portrait #portraitHint{display:flex;}
   background:radial-gradient(ellipse at center,rgba(230,57,70,0) 40%,rgba(230,57,70,.55) 100%);
   transition:opacity .15s;}
 #hitFlash.show{opacity:1;}
+
+/* Fast Travel city map */
+#cityMapGrid{position:relative;width:min(74vw,460px);height:min(74vw,460px);margin:16px auto 0;
+  background:radial-gradient(circle at 50% 50%,#232a1c,#12150f);border:2px solid rgba(255,215,0,.35);border-radius:14px;overflow:hidden;}
+.cityMapNode{position:absolute;transform:translate(-50%,-50%);border-radius:50%;border:2px solid rgba(255,255,255,.6);
+  display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-weight:900;
+  color:#0a0a0e;text-align:center;cursor:pointer;font-size:.66rem;line-height:1.15;padding:2px;touch-action:manipulation;
+  transition:transform .15s;}
+.cityMapNode:hover{transform:translate(-50%,-50%) scale(1.06);}
+.cityMapNode.locked{background:rgba(255,255,255,.06) !important;border-color:rgba(255,255,255,.2);color:rgba(255,255,255,.35) !important;cursor:not-allowed;}
+.cityMapNode.here{box-shadow:0 0 0 3px #fff,0 0 20px rgba(255,255,255,.85);}
+
+#travelLoading{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;flex-direction:column;
+  background:#050505;color:#fff;font-family:Georgia,serif;gap:14px;}
+#travelLoading.show{display:flex;}
+.travel-spin{font-size:3rem;animation:travelBounce .7s ease-in-out infinite;}
+@keyframes travelBounce{0%,100%{transform:translateY(0) rotate(-8deg);}50%{transform:translateY(-14px) rotate(8deg);}}
+#travelLoadingText{font-size:1.1rem;font-weight:700;letter-spacing:1px;}
 
 /* Shop */
 .shop-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;text-align:left;}
@@ -248,6 +270,7 @@ body.touch-mode.portrait #portraitHint{display:flex;}
     <button class="wkey" data-w="escopeta" title="Escopeta">3</button>
     <button class="wkey" id="reloadBtn" title="Recargar">R</button>
     <button class="wkey" id="shopBtnTouch" title="Tienda">B · Tienda</button>
+    <button class="wkey" id="mapBtnTouch" title="Mapa de la ciudad">🗺️ M · Mapa</button>
   </div>
 
   <button id="pauseBtnTouch" title="Pausa">⏸</button>
@@ -262,6 +285,7 @@ body.touch-mode.portrait #portraitHint{display:flex;}
   <div id="lookZone"></div>
   <div id="joystickBase"><div id="joystickKnob"></div></div>
   <div id="jumpBtn">⤴</div>
+  <div id="interactBtn">🅴</div>
   <div id="fireBtn">🔫</div>
 </div>
 
@@ -285,8 +309,25 @@ body.touch-mode.portrait #portraitHint{display:flex;}
     <div class="controls-card" id="controlsCardPause">
       <div><b>WASD</b> moverte &nbsp; <b>Shift</b> correr &nbsp; <b>Espacio</b> saltar</div>
       <div><b>Click</b> atacar &nbsp; <b>1/2/3</b> arma &nbsp; <b>R</b> recargar &nbsp; <b>B</b> tienda</div>
+      <div><b>M</b> mapa / viaje rápido &nbsp; <b>E</b> subir a la moto o usar una estación</div>
     </div>
   </div>
+</div>
+
+<!-- Fast Travel city map -->
+<div id="cityMapScreen" class="overlay hidden">
+  <div class="panel" style="max-width:600px;">
+    <div class="title-main gold-text" style="font-size:2rem;">MAPA DE LA CIUDAD</div>
+    <div class="title-sub" style="font-size:.78rem;letter-spacing:4px;">Viaje rápido</div>
+    <div id="cityMapGrid"></div>
+    <div class="tagline" style="margin-top:10px;font-size:.72rem;">Tocá un distrito descubierto (con color) para viajar al instante. Los "???" todavía no los conociste — acercate caminando, en moto o por avenida.</div>
+    <button id="closeCityMapBtn" class="mini-btn" style="margin-top:8px;">Cerrar (M)</button>
+  </div>
+</div>
+
+<div id="travelLoading">
+  <div class="travel-spin">🚕</div>
+  <div id="travelLoadingText">Viajando...</div>
 </div>
 
 <!-- Shop Menu -->
@@ -351,15 +392,31 @@ const RANKS = [
   {min:300, name:'Subjefe'},
   {min:500, name:'Padrino'}
 ];
-const MAP_HALF = 300; // for minimap scaling
+// World is laid out on a shared world-units grid; MAP_HALF is the half-width
+// of the playable square used for clamping the player and scaling both the
+// minimap and the city fast-travel map. Districts got ~2.6x bigger (see
+// BARRIO_DEFS below), so this grew to match — everything derives from these
+// two numbers, nothing about map scale is hardcoded elsewhere.
+const MAP_HALF = 850;
+// How far the player must be from a barrio's building/prop content before it
+// gets torn down again, vs. how close before it gets (re)built — see
+// updateWorldStreaming(). The gap between the two avoids rebuilding/tearing
+// down every frame when standing right on the boundary ("hysteresis").
+const STREAM_LOAD_RADIUS = 260;
+const STREAM_UNLOAD_RADIUS = 420;
 
+// `layout` picks which per-district "identity" buildBarrioDetail() uses
+// (building palette/heights/park style) — see DISTRICT_IDENTITY below.
+// `transit` lists which fast-travel station flavors this district gets;
+// every district gets a metro entrance ("la red de subte conecta toda la
+// ciudad") and a bus stop, home additionally gets the taxi stand hub.
 const BARRIO_DEFS = [
-  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:46, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null},
-  {id:'norte',   name:'Barrio Norte',    x:0,    z:-120, size:50, color:0x3d8bff, home:false, owned:false, thugs:3, boss:'mini'},
-  {id:'sur',     name:'Barrio Sur',      x:0,    z:120,  size:50, color:0x3ddc84, home:false, owned:false, thugs:3, boss:'mini'},
-  {id:'este',    name:'Barrio Este',     x:120,  z:0,    size:50, color:0xff8c3d, home:false, owned:false, thugs:3, boss:'mini'},
-  {id:'oeste',   name:'Barrio Oeste',    x:-120, z:0,    size:50, color:0xd63dff, home:false, owned:false, thugs:3, boss:'mini'},
-  {id:'central', name:'Barrio Central',  x:0,    z:-260, size:60, color:0xe63946, home:false, owned:false, thugs:4, boss:'final'}
+  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:120, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null,   layout:'plaza',      transit:['metro','bus','taxi']},
+  {id:'norte',   name:'Barrio Norte',    x:0,    z:-320, size:130, color:0x3d8bff, home:false, owned:false, thugs:5, boss:'mini',  layout:'torres',     transit:['metro','bus']},
+  {id:'sur',     name:'Barrio Sur',      x:0,    z:320,  size:130, color:0x3ddc84, home:false, owned:false, thugs:5, boss:'mini',  layout:'residencial',transit:['metro','bus']},
+  {id:'este',    name:'Barrio Este',     x:320,  z:0,    size:130, color:0xff8c3d, home:false, owned:false, thugs:5, boss:'mini',  layout:'comercial',  transit:['metro','bus']},
+  {id:'oeste',   name:'Barrio Oeste',    x:-320, z:0,    size:130, color:0xd63dff, home:false, owned:false, thugs:5, boss:'mini',  layout:'mercado',    transit:['metro','bus']},
+  {id:'central', name:'Barrio Central',  x:0,    z:-700, size:155, color:0xe63946, home:false, owned:false, thugs:6, boss:'final', layout:'fortaleza',  transit:['metro','bus']}
 ];
 
 const WEAPONS = {
@@ -456,7 +513,24 @@ const G = {
   player:null, enemies:[], projectiles:[], buildingAABBs:[], buildingMeshes:[],
   barrios:[], popups:[],
   startTime:0,
-  orbitAngle:0
+  orbitAngle:0,
+  // Fast travel: every station/stop/taxi/monorail-platform prop in the world
+  // (regardless of barrio or transit type) is pushed into this one flat list
+  // as {x,z,barrioId,label} so the E-to-interact check has a single place to
+  // look — see updateTransitProximity().
+  transitPoints:[],
+  nearTransitPoint:null,
+  // Streaming: recomputed on a timer (not every frame) in updateWorldStreaming.
+  streamTimer:0,
+  // Rideable motorcycle — see createVehicle()/updateVehicle().
+  vehicle:null,
+  // Monorail — see createMonorail()/updateMonorail().
+  monorail:null,
+  cityMapOpen:false,
+  // Sky dome + sun re-centered on the player every frame (see
+  // updateFollowCamera) now that the map is much bigger than either was
+  // originally sized for.
+  skyMesh:null, sunLight:null,
 };
 
 /* ============================================================
@@ -511,7 +585,8 @@ function initScene(){
   const skyTex = new THREE.CanvasTexture(skyCanvas);
   const skyGeo = new THREE.SphereGeometry(480,16,16);
   const skyMat = new THREE.MeshBasicMaterial({map:skyTex, side:THREE.BackSide, fog:false});
-  G.scene.add(new THREE.Mesh(skyGeo,skyMat));
+  G.skyMesh = new THREE.Mesh(skyGeo,skyMat);
+  G.scene.add(G.skyMesh); // repositioned onto the camera every frame — see updateFollowCamera()
   G.scene.background = new THREE.Color(0x2a2650);
   G.scene.fog = new THREE.Fog(0x3a3050, 70, 340);
 
@@ -522,11 +597,17 @@ function initScene(){
   sun.position.set(120,180,90);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048,2048);
-  sun.shadow.camera.left=-320; sun.shadow.camera.right=320;
-  sun.shadow.camera.top=320; sun.shadow.camera.bottom=-320;
-  sun.shadow.camera.far=520;
+  // Kept deliberately tight (recentered on the player every frame — see
+  // updateSunFollow()) rather than sized to cover the whole (now much
+  // bigger) map: a frustum that size at 2048px would give blocky shadows,
+  // and shadows on far-away districts are barely noticeable anyway.
+  sun.shadow.camera.left=-150; sun.shadow.camera.right=150;
+  sun.shadow.camera.top=150; sun.shadow.camera.bottom=-150;
+  sun.shadow.camera.far=420;
   sun.shadow.bias=-.0015;
   G.scene.add(sun);
+  G.scene.add(sun.target);
+  G.sunLight = sun;
   G.scene.add(new THREE.AmbientLight(0x556080,.35));
 
   // ground
@@ -539,18 +620,33 @@ function initScene(){
     gctx.beginPath(); gctx.moveTo(0,i); gctx.lineTo(256,i); gctx.stroke(); }
   const groundTex = new THREE.CanvasTexture(groundTexCanvas);
   groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
-  groundTex.repeat.set(100,100);
-  const groundGeo = new THREE.PlaneGeometry(1400,1400);
+  // Ground plane has to comfortably cover the whole play area (±MAP_HALF)
+  // with room to spare; repeat is scaled to match so the tile density on
+  // the ground looks the same as before, just covering more of it.
+  const GROUND_SIZE = MAP_HALF*2 + 400;
+  groundTex.repeat.set(GROUND_SIZE/14, GROUND_SIZE/14);
+  const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
   const groundMat = new THREE.MeshStandardMaterial({map:groundTex, roughness:.95});
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x=-Math.PI/2; ground.receiveShadow=true;
   G.scene.add(ground);
 
-  // barrios
+  // --- barrios: cheap "always-on shell" only. The expensive part (buildings,
+  // parks, street furniture, transit stops) is generated lazily by
+  // buildBarrioDetail() once the player is nearby — see updateWorldStreaming().
+  // This is what makes the much bigger world (2.6x district size) affordable:
+  // only ~1-2 districts worth of detail geometry exist in the scene at once.
   BARRIO_DEFS.forEach(def=>{
     const barrio = Object.assign({}, def);
     barrio.enemyList = [];
     barrio.cleared = def.home;
+    barrio.discovered = !!def.home; // home is always known; the rest are found by walking there
+    barrio.buildingAABBs = [];      // this barrio's own building footprints (collision)
+    barrio.buildingMeshes = [];     // this barrio's own building meshes (camera-collision raycast)
+    barrio.transitPoints = [];      // this barrio's metro/bus/taxi station world positions
+    barrio.detailBuilt = false;
+    barrio.detailGroup = new THREE.Group();
+    G.scene.add(barrio.detailGroup);
 
     const zoneGeo = new THREE.PlaneGeometry(barrio.size, barrio.size);
     const zoneMat = new THREE.MeshBasicMaterial({color: barrio.owned?0xffd700:barrio.color, transparent:true, opacity:.4, depthWrite:false});
@@ -559,48 +655,43 @@ function initScene(){
     G.scene.add(zone);
     barrio.zoneMesh = zone;
 
-    // flagpole
-    const poleGeo = new THREE.CylinderGeometry(.15,.15,7,8);
+    // flagpole (taller now to stay visible over the bigger buildings)
+    const poleGeo = new THREE.CylinderGeometry(.18,.18,10,8);
     const poleMat = new THREE.MeshStandardMaterial({color:0x3a3a3a, metalness:.5, roughness:.5});
     const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.set(barrio.x, 3.5, barrio.z);
+    pole.position.set(barrio.x, 5, barrio.z);
     pole.castShadow=true;
     G.scene.add(pole);
-    const flagGeo = new THREE.PlaneGeometry(2.2,1.4);
+    const flagGeo = new THREE.PlaneGeometry(2.8,1.8);
     const flagMat = new THREE.MeshStandardMaterial({color: barrio.owned?0xffd700:barrio.color, side:THREE.DoubleSide});
     const flag = new THREE.Mesh(flagGeo, flagMat);
-    flag.position.set(barrio.x+1.15, 6.2, barrio.z);
+    flag.position.set(barrio.x+1.45, 8.7, barrio.z);
     G.scene.add(flag);
     barrio.flagMesh = flag;
 
-    // buildings (skip near-center reserved plaza)
-    const bCount = barrio.home ? 5 : 6+Math.floor(Math.random()*3);
-    for(let i=0;i<bCount;i++){
-      let bx,bz,tries=0;
-      do{
-        bx = barrio.x + (Math.random()-.5)*(barrio.size-8);
-        bz = barrio.z + (Math.random()-.5)*(barrio.size-8);
-        tries++;
-      } while(Math.hypot(bx-barrio.x,bz-barrio.z)<10 && tries<10);
-      const w=3+Math.random()*4, d=3+Math.random()*4, h=4+Math.random()*10;
-      const palette=[0x6b6255,0x5a5148,0x746a52,0x4f5560,0x615a4e,0x574f45];
-      const col = palette[Math.floor(Math.random()*palette.length)];
-      const bGeo = new THREE.BoxGeometry(w,h,d);
-      const bMat = new THREE.MeshStandardMaterial({color:col, roughness:.85});
-      const bMesh = new THREE.Mesh(bGeo,bMat);
-      bMesh.position.set(bx,h/2,bz);
-      bMesh.castShadow=true; bMesh.receiveShadow=true;
-      G.scene.add(bMesh);
-      // roof cap
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(w*.7,.6,d*.7), new THREE.MeshStandardMaterial({color:0x201d18}));
-      roof.position.set(bx,h+.3,bz); roof.castShadow=true;
-      G.scene.add(roof);
-      G.buildingAABBs.push({minX:bx-w/2-.4, maxX:bx+w/2+.4, minZ:bz-d/2-.4, maxZ:bz+d/2+.4});
-      G.buildingMeshes.push(bMesh); // kept for the camera-collision raycast (see updateFollowCamera)
-    }
-
     G.barrios.push(barrio);
   });
+
+  // Wide avenues connecting every district to the home hub (and the final
+  // barrio onward from the north district) — always-on, cheap flat geometry.
+  buildAvenues();
+
+  // Metro entrances, bus stops and the home taxi stand — always-on fast
+  // travel doors into the city map.
+  buildTransitStations();
+
+  // The monorail loops the whole city and is cheap (a handful of meshes plus
+  // 2 moving cars), so it stays always-on rather than being streamed.
+  G.monorail = createMonorail();
+
+  // The player's parked motorcycle, near the home plaza.
+  G.vehicle = createVehicle(10, 14);
+
+  // Build detail immediately for whatever district the player starts in
+  // (home) so they never spawn into an empty shell; everything else streams
+  // in as they approach it.
+  buildBarrioDetail(G.barrios.find(b=>b.home));
+  refreshGlobalBuildingLists();
 
   // player
   G.player = createPlayer();
@@ -686,26 +777,35 @@ function makeHealthBar(){
 function spawnBarrioEnemies(barrio){
   const isFinal = barrio.boss==='final';
   const gangColor = barrio.color;
+  // Districts got ~2.6x bigger — spread enemies out over more of that space,
+  // but DON'T scale detect/attackRange by the same full factor: that would
+  // let every enemy in the district aggro simultaneously from far away and
+  // gang up on the player the moment they arrive. engageScale is a damped,
+  // capped version just for those two — spacing feels bigger without combat
+  // turning into "everyone shoots you from across the map at once".
+  const sizeScale = barrio.size/50;
+  const engageScale = Math.min(1.6, 1 + (sizeScale-1)*0.35);
+  const ringR = 14*sizeScale;
   for(let i=0;i<barrio.thugs;i++){
     const ang = (i/barrio.thugs)*Math.PI*2;
-    const ex = barrio.x + Math.cos(ang)*14;
-    const ez = barrio.z + Math.sin(ang)*14;
+    const ex = barrio.x + Math.cos(ang)*ringR;
+    const ez = barrio.z + Math.sin(ang)*ringR;
     createEnemy(barrio, ex, ez, {
       kind:'thug', color:gangColor, hp:isFinal?85:60, dmg:isFinal?11:8,
-      speed:4.3, detect:28, attackRange:19, cooldown:1.35,
+      speed:4.3, detect:28*engageScale, attackRange:19*engageScale, cooldown:1.35,
       moneyMin:20,moneyMax:40, powerReward:5, scale:1
     });
   }
   if(barrio.boss==='mini'){
-    createEnemy(barrio, barrio.x, barrio.z-6, {
+    createEnemy(barrio, barrio.x, barrio.z-6*sizeScale, {
       kind:'boss', color: shadeColor(gangColor,-0.35), hp:150, dmg:14,
-      speed:4.8, detect:32, attackRange:20, cooldown:1.0,
+      speed:4.8, detect:32*engageScale, attackRange:20*engageScale, cooldown:1.0,
       moneyMin:150,moneyMax:150, powerReward:20, scale:1.25
     });
   } else if(barrio.boss==='final'){
-    createEnemy(barrio, barrio.x, barrio.z-8, {
+    createEnemy(barrio, barrio.x, barrio.z-8*sizeScale, {
       kind:'finalboss', color:0x1a0000, hp:420, dmg:20,
-      speed:5.2, detect:36, attackRange:22, cooldown:.8,
+      speed:5.2, detect:36*engageScale, attackRange:22*engageScale, cooldown:.8,
       moneyMin:500,moneyMax:500, powerReward:80, scale:1.55
     });
   }
@@ -756,6 +856,593 @@ function shadeColor(hex,percent){
   return c.lerp(new THREE.Color(0xffffff), percent).getHex();
 }
 
+/* ============================================================
+   WORLD GENERATION — districts, avenues, transit, monorail, vehicle
+   ============================================================
+   Everything in this section builds the bigger, denser city and the ways of
+   getting around it. Three layers, cheapest-and-always-on first:
+     1. Always-on "shell" per barrio (built in initScene): ground tint,
+        flagpole. Practically free, so every district always shows up on
+        the map/minimap even before you've ever been near it.
+     2. Always-on city-wide furniture: avenues, transit stations, the
+        monorail loop, the player's motorcycle. Cheap enough (a few hundred
+        simple primitives total) to just always exist.
+     3. Streamed per-barrio "detail": buildings, parks, street lamps. This
+        is the expensive part (it scales with the now much bigger district
+        footprints), so buildBarrioDetail()/unbuildBarrioDetail() add and
+        remove it on demand based on player distance — see
+        updateWorldStreaming(). At most 1-2 districts have this loaded at
+        any moment no matter how big the total city gets. */
+
+// A tiny deterministic PRNG (mulberry32) + string hash, used ONLY for world
+// generation. Regular Math.random() would reshuffle a district's buildings
+// every time it streams back in, which would look broken; seeding from the
+// barrio id keeps every district's layout stable for the whole session.
+function hashString(str){
+  let h = 0;
+  for(let i=0;i<str.length;i++){ h = (Math.imul(31,h) + str.charCodeAt(i))|0; }
+  return h>>>0;
+}
+function makeSeededRandom(seed){
+  let s = seed>>>0;
+  return function(){
+    s = (s + 0x6D2B79F5)|0;
+    let t = Math.imul(s ^ (s>>>15), 1 | s);
+    t = (t + Math.imul(t ^ (t>>>7), 61 | t)) ^ t;
+    return ((t ^ (t>>>14)) >>> 0) / 4294967296;
+  };
+}
+
+// Per-district visual identity: building height range + color palette, how
+// big its park is, and roughly how many building "attempts" it gets (actual
+// count ends up lower once the plaza/park/street gaps are carved out).
+const DISTRICT_IDENTITY = {
+  plaza:       { heightRange:[4,10],  palette:[0x6b6255,0x746a52,0x8a7a5c,0x5a5148], parkSize:1.25, blockCount:3 },
+  torres:      { heightRange:[14,32], palette:[0x4f5560,0x3c4450,0x5a6270,0x333a44], parkSize:0.75, blockCount:4 },
+  residencial: { heightRange:[3,6],   palette:[0x8a6f55,0x7a6248,0x9c8060,0x6e5842], parkSize:1.5,  blockCount:5 },
+  comercial:   { heightRange:[6,14],  palette:[0x5c6e78,0x46545c,0x6d818c,0x3e4a52], parkSize:0.85, blockCount:4 },
+  mercado:     { heightRange:[3,7],   palette:[0x8a4a3a,0x9c5a3a,0x704228,0x6e3c28], parkSize:1.1,  blockCount:5 },
+  fortaleza:   { heightRange:[10,24], palette:[0x2a1418,0x3a1a1e,0x1e0e10,0x241012], parkSize:0.6,  blockCount:3 },
+};
+
+// Reused for every flat, oriented rectangle of ground (avenues, plaza
+// dressing): rotateX is baked into the GEOMETRY itself (not the mesh's
+// transform), so a mesh built from it can still be freely rotated around Y
+// afterwards to point in any compass direction — see buildAvenues().
+function makeFlatPlaneGeometry(width, length){
+  const geo = new THREE.PlaneGeometry(width, length);
+  geo.rotateX(-Math.PI/2);
+  return geo;
+}
+
+function makeAvenueTexture(){
+  const c = document.createElement('canvas');
+  c.width=64; c.height=128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle='#333138'; ctx.fillRect(0,0,64,128);
+  ctx.fillStyle='#48454e'; ctx.fillRect(0,0,7,128); ctx.fillRect(57,0,7,128); // sidewalks
+  ctx.fillStyle='#e8c94a';
+  for(let y=6;y<128;y+=26){ ctx.fillRect(29,y,6,15); } // dashed centerline
+  return new THREE.CanvasTexture(c);
+}
+
+/* Wide avenues linking every district back to the home hub (and the final
+   barrio onward from the north district, so it's not a dead end). Always-on:
+   flat geometry, essentially free. */
+function buildAvenues(){
+  const AVENUE_WIDTH = 16;
+  const pairs = [['home','norte'],['home','sur'],['home','este'],['home','oeste'],['norte','central']];
+  pairs.forEach(([aId,bId])=>{
+    const a = BARRIO_DEFS.find(d=>d.id===aId), b = BARRIO_DEFS.find(d=>d.id===bId);
+    const dx=b.x-a.x, dz=b.z-a.z;
+    const length = Math.hypot(dx,dz);
+    const geo = makeFlatPlaneGeometry(AVENUE_WIDTH, length);
+    const tex = makeAvenueTexture();
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, length/18);
+    const mat = new THREE.MeshStandardMaterial({map:tex, roughness:.95});
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set((a.x+b.x)/2, 0.018, (a.z+b.z)/2);
+    mesh.rotation.y = Math.atan2(-dx/length, -dz/length);
+    mesh.receiveShadow = true;
+    G.scene.add(mesh);
+  });
+}
+
+/* ---------- small reusable world props (all simple primitives, matching
+   the game's existing low-poly look) ---------- */
+function makeTree(){
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.18,.24,1.6,6), new THREE.MeshStandardMaterial({color:0x4a3320, roughness:.9}));
+  trunk.position.y=.8; trunk.castShadow=true; g.add(trunk);
+  const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.3,2.5,8), new THREE.MeshStandardMaterial({color:0x2e5a2e, roughness:.9}));
+  leaves.position.y=2.5; leaves.castShadow=true; g.add(leaves);
+  return g;
+}
+function makeBench(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color:0x5a4128, roughness:.8});
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(1.4,.12,.5), mat);
+  seat.position.y=.45; g.add(seat);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.4,.5,.1), mat);
+  back.position.set(0,.7,-.2); g.add(back);
+  return g;
+}
+function makeLamp(){
+  const g = new THREE.Group();
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,3.2,6), new THREE.MeshStandardMaterial({color:0x2a2a2e, roughness:.6}));
+  post.position.y=1.6; g.add(post);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.18,8,8), new THREE.MeshStandardMaterial({color:0xffe9a8, emissive:0xffcf5c, emissiveIntensity:.5}));
+  head.position.y=3.2; g.add(head);
+  return g;
+}
+function makeMetroEntrance(){
+  const g = new THREE.Group();
+  const stair = new THREE.Mesh(new THREE.BoxGeometry(2.2,.3,2.6), new THREE.MeshStandardMaterial({color:0x3a3a40, roughness:.8}));
+  stair.position.y=.15; stair.receiveShadow=true; g.add(stair);
+  const postMat = new THREE.MeshStandardMaterial({color:0x222222});
+  [[-1.1,-1.1],[1.1,-1.1]].forEach(([px,pz])=>{
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,1.9,6), postMat);
+    post.position.set(px,.95,pz); g.add(post);
+  });
+  const arch = new THREE.Mesh(new THREE.BoxGeometry(2.4,.25,.3), new THREE.MeshStandardMaterial({color:0xffd700, metalness:.5, roughness:.4}));
+  arch.position.set(0,1.9,-1.1); g.add(arch);
+  const sign = new THREE.Mesh(new THREE.CircleGeometry(.5,16), new THREE.MeshStandardMaterial({color:0xe63946, side:THREE.DoubleSide}));
+  sign.position.set(0,2.5,-1.1); g.add(sign);
+  const signBar = new THREE.Mesh(new THREE.BoxGeometry(.8,.13,.05), new THREE.MeshStandardMaterial({color:0xffffff}));
+  signBar.position.set(0,2.5,-1.07); g.add(signBar);
+  return g;
+}
+function makeBusStop(){
+  const g = new THREE.Group();
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,2.6,6), new THREE.MeshStandardMaterial({color:0x555555}));
+  post.position.y=1.3; g.add(post);
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(.7,.9,.06), new THREE.MeshStandardMaterial({color:0x3d8bff}));
+  sign.position.set(0,2.35,0); g.add(sign);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(2.4,.1,1.1), new THREE.MeshStandardMaterial({color:0x2a2a2e}));
+  roof.position.set(0,2.1,.6); roof.castShadow=true; g.add(roof);
+  const bench = makeBench();
+  bench.position.set(0,0,.6); g.add(bench);
+  return g;
+}
+function makeTaxiStand(){
+  // A parked taxi — a landmark you fast-travel from, not itself driveable
+  // (the motorcycle is the one manually-driven vehicle).
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({color:0xffcc33, roughness:.4, metalness:.3});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.7,.7,3.4), paint);
+  body.position.y=.6; body.castShadow=true; g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.5,.6,1.8), paint);
+  cabin.position.set(0,1.15,-.1); cabin.castShadow=true; g.add(cabin);
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(.5,.25,.5), new THREE.MeshStandardMaterial({color:0x111111}));
+  sign.position.set(0,1.55,-.1); g.add(sign);
+  const wheelMat = new THREE.MeshStandardMaterial({color:0x111111});
+  [[-.8,.35,1.1],[.8,.35,1.1],[-.8,.35,-1.1],[.8,.35,-1.1]].forEach(([x,y,z])=>{
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.32,.32,.25,10), wheelMat);
+    wheel.rotation.x=Math.PI/2; wheel.position.set(x,y,z); g.add(wheel);
+  });
+  return g;
+}
+
+/* Metro / bus / taxi fast-travel stations. Always-on (small + cheap): every
+   district gets a metro entrance and a bus stop ("la red de subte y
+   colectivos conecta toda la ciudad"), home additionally gets the taxi
+   stand. All of them are just doors into the SAME fast-travel city map —
+   see tryInteract()/openCityMap() — rather than three separate transport
+   simulations, which would be a lot of extra mechanics for no real
+   gameplay difference in an arcade game like this. */
+function buildTransitStations(){
+  G.barrios.forEach(barrio=>{
+    const plazaR = barrio.size*0.15;
+    barrio.transit.forEach((kind,i)=>{
+      const angle = (i/barrio.transit.length)*Math.PI*2 + 0.6;
+      const x = barrio.x + Math.cos(angle)*(plazaR+7);
+      const z = barrio.z + Math.sin(angle)*(plazaR+7);
+      let prop, label;
+      if(kind==='metro'){ prop=makeMetroEntrance(); label='Subte'; }
+      else if(kind==='bus'){ prop=makeBusStop(); label='Colectivo'; }
+      else { prop=makeTaxiStand(); label='Taxi'; }
+      prop.position.set(x,0,z);
+      prop.rotation.y = angle;
+      G.scene.add(prop);
+      barrio.transitPoints.push({x,z,label:label+' · '+barrio.name});
+    });
+  });
+}
+
+/* ---------- district park + building generation (the streamed "detail" layer) ---------- */
+function addParkZone(barrio, cx, cz, r, rand){
+  const grass = new THREE.Mesh(new THREE.CircleGeometry(r,20), new THREE.MeshStandardMaterial({color:0x3a6b3a, roughness:1}));
+  grass.rotation.x=-Math.PI/2; grass.position.set(cx,0.02,cz);
+  barrio.detailGroup.add(grass);
+  const treeCount = 6+Math.floor(rand()*5);
+  for(let i=0;i<treeCount;i++){
+    const a=rand()*Math.PI*2, dist=rand()*r*0.85;
+    const tree = makeTree();
+    tree.position.set(cx+Math.cos(a)*dist, 0, cz+Math.sin(a)*dist);
+    barrio.detailGroup.add(tree);
+  }
+  for(let i=0;i<3;i++){
+    const a=(i/3)*Math.PI*2+rand();
+    const bench = makeBench();
+    bench.position.set(cx+Math.cos(a)*r*0.55, 0, cz+Math.sin(a)*r*0.55);
+    bench.rotation.y = a;
+    barrio.detailGroup.add(bench);
+  }
+}
+
+/* Builds one district's buildings/park/street lamps into barrio.detailGroup.
+   Uses rejection sampling to place buildings: candidates too close to the
+   plaza, the park, or an already-placed building are skipped, which is what
+   actually carves out real walkable streets between blocks instead of a
+   solid wall of buildings — this is also where "más espacio entre
+   construcciones" comes from. Layout is seeded per-barrio-id so it stays
+   identical every time streaming rebuilds it. */
+function buildBarrioDetail(barrio){
+  if(barrio.detailBuilt) return;
+  barrio.detailBuilt = true;
+  const rand = makeSeededRandom(hashString(barrio.id));
+  const identity = DISTRICT_IDENTITY[barrio.layout] || DISTRICT_IDENTITY.plaza;
+  const half = barrio.size/2 - 8; // keep an 8-unit ring clear near the edge for the connecting avenue
+  const plazaR = barrio.size*0.15;
+
+  // one park/plaza-adjacent green zone per district, in a random-but-stable quadrant
+  const parkAngle = rand()*Math.PI*2;
+  const parkDist = half*0.6;
+  const parkCX = barrio.x+Math.cos(parkAngle)*parkDist;
+  const parkCZ = barrio.z+Math.sin(parkAngle)*parkDist;
+  const parkR = Math.max(8, half*0.32*identity.parkSize);
+  addParkZone(barrio, parkCX, parkCZ, parkR, rand);
+
+  // lamp posts ringing the central plaza, plus along the two cross-streets
+  for(let i=0;i<6;i++){
+    const a=(i/6)*Math.PI*2;
+    const lamp = makeLamp();
+    lamp.position.set(barrio.x+Math.cos(a)*(plazaR+2.5), 0, barrio.z+Math.sin(a)*(plazaR+2.5));
+    barrio.detailGroup.add(lamp);
+  }
+  for(let d=plazaR+12; d<half; d+=18){
+    [[d,0],[-d,0],[0,d],[0,-d]].forEach(([ox,oz])=>{
+      const lamp = makeLamp();
+      lamp.position.set(barrio.x+ox, 0, barrio.z+oz);
+      barrio.detailGroup.add(lamp);
+    });
+  }
+
+  // building blocks
+  const targetCount = identity.blockCount*(3+Math.floor(rand()*3));
+  const placed = [];
+  const GAP = 5; // minimum clear gap between buildings — this gap IS the street
+  for(let n=0;n<targetCount;n++){
+    let ok=false, x=0,z=0,w=0,d=0,h=0,hw=0,hd=0;
+    for(let tries=0; tries<24 && !ok; tries++){
+      x = barrio.x + (rand()*2-1)*half;
+      z = barrio.z + (rand()*2-1)*half;
+      w = 3+rand()*5; d = 3+rand()*5;
+      h = identity.heightRange[0] + rand()*(identity.heightRange[1]-identity.heightRange[0]);
+      hw = w/2+GAP/2; hd = d/2+GAP/2;
+      if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+Math.max(hw,hd)) continue; // keep plaza clear
+      if(Math.hypot(x-parkCX,z-parkCZ) < parkR+Math.max(hw,hd)) continue;      // keep park clear
+      ok = true;
+      for(let i=0;i<placed.length && ok;i++){
+        const p = placed[i];
+        if(Math.abs(x-p.x) < hw+p.hw && Math.abs(z-p.z) < hd+p.hd) ok=false; // overlaps another block -> leave as street
+      }
+    }
+    if(!ok) continue; // no free spot found — that's fine, it just stays open street/lot
+    placed.push({x,z,hw,hd});
+
+    const col = identity.palette[Math.floor(rand()*identity.palette.length)];
+    const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color:col, roughness:.85}));
+    bMesh.position.set(x,h/2,z);
+    bMesh.castShadow=true; bMesh.receiveShadow=true;
+    barrio.detailGroup.add(bMesh);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w*.7,.6,d*.7), new THREE.MeshStandardMaterial({color:0x201d18}));
+    roof.position.set(x,h+.3,z); roof.castShadow=true;
+    barrio.detailGroup.add(roof);
+
+    barrio.buildingAABBs.push({minX:x-w/2-.4, maxX:x+w/2+.4, minZ:z-d/2-.4, maxZ:z+d/2+.4});
+    barrio.buildingMeshes.push(bMesh);
+  }
+}
+
+/* Tears down a district's streamed detail (disposing geometry/materials so
+   the GPU actually frees the memory, not just removing it from the scene
+   graph) — the "descargar distritos lejanos" half of world streaming. */
+function unbuildBarrioDetail(barrio){
+  if(!barrio.detailBuilt) return;
+  barrio.detailBuilt = false;
+  barrio.detailGroup.traverse(obj=>{
+    if(obj.geometry) obj.geometry.dispose();
+    if(obj.material){
+      if(Array.isArray(obj.material)) obj.material.forEach(m=>m.dispose());
+      else obj.material.dispose();
+    }
+  });
+  while(barrio.detailGroup.children.length) barrio.detailGroup.remove(barrio.detailGroup.children[0]);
+  barrio.buildingAABBs.length = 0;
+  barrio.buildingMeshes.length = 0;
+}
+
+// G.buildingAABBs/buildingMeshes (used by player/camera/enemy collision) are
+// just the union of whichever barrios currently have their detail loaded —
+// recomputed only when streaming actually adds/removes a district, not
+// every frame.
+function refreshGlobalBuildingLists(){
+  G.buildingAABBs = [];
+  G.buildingMeshes = [];
+  G.barrios.forEach(b=>{
+    if(!b.detailBuilt) return;
+    for(let i=0;i<b.buildingAABBs.length;i++) G.buildingAABBs.push(b.buildingAABBs[i]);
+    for(let i=0;i<b.buildingMeshes.length;i++) G.buildingMeshes.push(b.buildingMeshes[i]);
+  });
+}
+
+/* World streaming: checked a couple times a second (not every frame — cheap
+   distance checks, no need to run them 60x/sec). Builds detail for any
+   district the player has walked close to, and tears down detail for any
+   district that's now far away. The gap between STREAM_LOAD_RADIUS and
+   STREAM_UNLOAD_RADIUS is deliberate ("hysteresis") so standing near a
+   district's edge doesn't build/unbuild it every check. */
+function updateWorldStreaming(dt){
+  G.streamTimer -= dt;
+  if(G.streamTimer>0) return;
+  G.streamTimer = 0.5;
+  const pp = G.player.group.position;
+  let changed = false;
+  G.barrios.forEach(b=>{
+    const d = Math.hypot(pp.x-b.x, pp.z-b.z);
+    if(!b.detailBuilt && d<STREAM_LOAD_RADIUS){ buildBarrioDetail(b); changed=true; }
+    else if(b.detailBuilt && d>STREAM_UNLOAD_RADIUS){ unbuildBarrioDetail(b); changed=true; }
+  });
+  if(changed) refreshGlobalBuildingLists();
+}
+
+/* District discovery: walking into a district for the first time unlocks it
+   on the fast-travel map. Cheap (6 distance checks), so this runs every
+   frame for snappy feedback instead of on the streaming timer. */
+function updateDiscovery(){
+  const pp = G.player.group.position;
+  G.barrios.forEach(b=>{
+    if(b.discovered) return;
+    if(Math.hypot(pp.x-b.x, pp.z-b.z) < b.size/2+15){
+      b.discovered = true;
+      showBanner('🗺️ NUEVO DISTRITO: '+b.name.toUpperCase()+' — VIAJE RÁPIDO DISPONIBLE');
+      sfxDomination();
+    }
+  });
+}
+
+/* ---------- motorcycle: the one manually-driven vehicle ---------- */
+function createVehicle(x,z){
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({color:0xb01c2e, roughness:.4, metalness:.4});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(.5,.5,1.7), bodyMat);
+  body.position.y=.62; body.castShadow=true; group.add(body);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(.4,.15,.7), new THREE.MeshStandardMaterial({color:0x161616}));
+  seat.position.set(0,.92,-.05); group.add(seat);
+  const wheelMat = new THREE.MeshStandardMaterial({color:0x111111, roughness:.8});
+  const wheelGeo = new THREE.TorusGeometry(.34,.11,8,16);
+  const wheelF = new THREE.Mesh(wheelGeo, wheelMat);
+  wheelF.rotation.y=Math.PI/2; wheelF.position.set(0,.34,.75); group.add(wheelF);
+  const wheelB = new THREE.Mesh(wheelGeo, wheelMat);
+  wheelB.rotation.y=Math.PI/2; wheelB.position.set(0,.34,-.75); group.add(wheelB);
+  const headlight = new THREE.Mesh(new THREE.SphereGeometry(.12,8,8), new THREE.MeshStandardMaterial({color:0xfff2c0, emissive:0xffe58a, emissiveIntensity:.6}));
+  headlight.position.set(0,.68,1.05); group.add(headlight);
+  const handlebar = new THREE.Mesh(new THREE.BoxGeometry(.7,.08,.08), new THREE.MeshStandardMaterial({color:0x222222}));
+  handlebar.position.set(0,1.05,.85); group.add(handlebar);
+  group.position.set(x,0,z);
+  G.scene.add(group);
+  return { group, mounted:false, speed:20 };
+}
+
+function updateVehicle(){
+  const veh = G.vehicle, pl = G.player;
+  if(veh.mounted){
+    veh.group.position.set(pl.group.position.x, pl.group.position.y, pl.group.position.z);
+    veh.group.rotation.y = pl.group.rotation.y;
+  }
+}
+
+/* ---------- monorail: a real train that continuously loops the whole city ---------- */
+function createMonorail(){
+  const RAIL_HEIGHT = 24;
+  // Loop roughly tracing the city's outer ring, so it visibly "recorre toda
+  // la ciudad" without cutting through the middle of any district's plaza.
+  const waypoints = [
+    new THREE.Vector3(230, RAIL_HEIGHT, 230),
+    new THREE.Vector3(230, RAIL_HEIGHT, -230),
+    new THREE.Vector3(120, RAIL_HEIGHT, -600),
+    new THREE.Vector3(-120, RAIL_HEIGHT, -600),
+    new THREE.Vector3(-230, RAIL_HEIGHT, -230),
+    new THREE.Vector3(-230, RAIL_HEIGHT, 230),
+  ];
+  const curve = new THREE.CatmullRomCurve3(waypoints, true, 'catmullrom', 0.5);
+
+  const pylonMat = new THREE.MeshStandardMaterial({color:0x2c2c30, roughness:.6, metalness:.3});
+  const railMat = new THREE.MeshStandardMaterial({color:0x1c1c20, roughness:.5, metalness:.5});
+  const SEGMENTS = 90;
+  const pts = curve.getPoints(SEGMENTS);
+  for(let i=0;i<SEGMENTS;i++){
+    const p0=pts[i], p1=pts[i+1];
+    const mid = p0.clone().add(p1).multiplyScalar(.5);
+    const segLen = p0.distanceTo(p1);
+    const dx=p1.x-p0.x, dz=p1.z-p0.z;
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(1.6,.35,segLen*1.05), railMat);
+    rail.position.copy(mid);
+    rail.rotation.y = Math.atan2(-dx/segLen, -dz/segLen);
+    G.scene.add(rail);
+    if(i%6===0){
+      const pylon = new THREE.Mesh(new THREE.CylinderGeometry(.5,.7,RAIL_HEIGHT,8), pylonMat);
+      pylon.position.set(p0.x, RAIL_HEIGHT/2, p0.z);
+      pylon.castShadow = true;
+      G.scene.add(pylon);
+    }
+  }
+
+  const cars = [0, 0.5].map(startT=>{
+    const car = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.4,2.6,7), new THREE.MeshStandardMaterial({color:0xe8d24a, metalness:.3, roughness:.4}));
+    body.castShadow=true; car.add(body);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.42,.5,7.02), new THREE.MeshStandardMaterial({color:0x1c1c20}));
+    stripe.position.y=-.3; car.add(stripe);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(1.5,1.4,4), new THREE.MeshStandardMaterial({color:0xe8d24a}));
+    nose.rotation.x=Math.PI/2; nose.rotation.y=Math.PI/4; nose.position.z=3.9;
+    car.add(nose);
+    G.scene.add(car);
+    return { group:car, t:startT };
+  });
+
+  // Two boarding platforms that double as fast-travel points, near home and
+  // near the final barrio, so the monorail is a functional transit option
+  // and not just scenery.
+  [{x:36, z:14, barrioId:'home'}, {x:20, z:-660, barrioId:'central'}].forEach(spot=>{
+    const platform = new THREE.Group();
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(6,.4,3), new THREE.MeshStandardMaterial({color:0x3a3a40, roughness:.8}));
+    deck.position.y = RAIL_HEIGHT-2.2; deck.castShadow=true; platform.add(deck);
+    const legMat = new THREE.MeshStandardMaterial({color:0x2a2a2e});
+    [[-2.6,-1.2],[2.6,-1.2],[-2.6,1.2],[2.6,1.2]].forEach(([lx,lz])=>{
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(.22,.22,RAIL_HEIGHT-2.2,6), legMat);
+      leg.position.set(lx,(RAIL_HEIGHT-2.2)/2,lz); platform.add(leg);
+    });
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(1.6,.7,.08), new THREE.MeshStandardMaterial({color:0xe8d24a}));
+    sign.position.set(0,RAIL_HEIGHT-1.6,-1.6); platform.add(sign);
+    platform.position.set(spot.x,0,spot.z);
+    G.scene.add(platform);
+    const barrio = G.barrios.find(b=>b.id===spot.barrioId);
+    if(barrio) barrio.transitPoints.push({x:spot.x, z:spot.z, label:'Monorriel · '+barrio.name});
+  });
+
+  return { curve, cars, speed:0.018 };
+}
+
+function updateMonorail(dt){
+  const m = G.monorail;
+  if(!m) return;
+  m.cars.forEach(car=>{
+    car.t = (car.t + m.speed*dt) % 1;
+    const pos = m.curve.getPointAt(car.t);
+    const tangent = m.curve.getTangentAt(car.t);
+    car.group.position.set(pos.x, pos.y-0.4, pos.z);
+    car.group.rotation.y = Math.atan2(tangent.x, tangent.z);
+  });
+}
+
+/* ---------- E-to-interact: mount/dismount the bike, or open the fast-travel map near a station ---------- */
+function updateInteractionHint(){
+  const pl = G.player, veh = G.vehicle, pp = pl.group.position;
+  const hint = document.getElementById('hint');
+  const key = isTouchDevice ? 'Tocá 🅴' : 'Presioná E';
+  if(veh.mounted){
+    hint.textContent = key+' para bajar de la moto';
+    hint.classList.add('show');
+    G.nearTransitPoint = null;
+    return;
+  }
+  if(Math.hypot(pp.x-veh.group.position.x, pp.z-veh.group.position.z) < 3){
+    hint.textContent = key+' para subir a la moto 🏍️';
+    hint.classList.add('show');
+    G.nearTransitPoint = null;
+    return;
+  }
+  let nearest=null, nearestD=3.2;
+  G.barrios.forEach(b=>b.transitPoints.forEach(tp=>{
+    const d = Math.hypot(pp.x-tp.x, pp.z-tp.z);
+    if(d<nearestD){ nearestD=d; nearest=tp; }
+  }));
+  G.nearTransitPoint = nearest;
+  if(nearest){
+    hint.textContent = key+' para viajar · '+nearest.label;
+    hint.classList.add('show');
+  } else {
+    hint.classList.remove('show');
+  }
+}
+
+function tryInteract(){
+  if(!G.playing || G.menuState!=='none') return;
+  const pl=G.player, veh=G.vehicle, pp=pl.group.position;
+  if(veh.mounted){
+    veh.mounted = false;
+    veh.group.position.set(pp.x+Math.sin(G.camYaw)*1.6, 0, pp.z+Math.cos(G.camYaw)*1.6);
+    return;
+  }
+  if(Math.hypot(pp.x-veh.group.position.x, pp.z-veh.group.position.z) < 3){
+    veh.mounted = true;
+    return;
+  }
+  if(G.nearTransitPoint) openCityMap();
+}
+
+/* ---------- Fast Travel city map ---------- */
+function worldToCityMapPercent(x,z){
+  return { left: 50+(x/MAP_HALF)*50, top: 50+(z/MAP_HALF)*50 };
+}
+function renderCityMap(){
+  const grid = document.getElementById('cityMapGrid');
+  grid.innerHTML = '';
+  const pp = G.player.group.position;
+  let hereId=null, hereD=Infinity;
+  G.barrios.forEach(b=>{
+    const d=Math.hypot(pp.x-b.x, pp.z-b.z);
+    if(d<hereD){ hereD=d; hereId=b.id; }
+  });
+  G.barrios.forEach(b=>{
+    const pos = worldToCityMapPercent(b.x,b.z);
+    const sizePct = Math.max(10, (b.size/(MAP_HALF*2))*100*1.7);
+    const node = document.createElement('div');
+    node.className = 'cityMapNode'+(!b.discovered?' locked':'')+(b.id===hereId?' here':'');
+    node.style.left = pos.left+'%'; node.style.top = pos.top+'%';
+    node.style.width = sizePct+'%'; node.style.height = sizePct+'%';
+    if(b.discovered){
+      node.style.background = '#'+new THREE.Color(b.owned?0xffd700:b.color).getHexString();
+      node.textContent = b.name+(b.owned?' ✔':'');
+      bindTap(node, ()=>fastTravelTo(b.id));
+    } else {
+      node.textContent = '???';
+    }
+    grid.appendChild(node);
+  });
+}
+function openCityMap(){
+  if(!G.playing || (G.menuState!=='none' && G.menuState!=='map')) return;
+  G.menuState = 'map';
+  renderCityMap();
+  document.getElementById('cityMapScreen').classList.remove('hidden');
+  if(G.locked) document.exitPointerLock();
+}
+function closeCityMap(){
+  if(G.menuState!=='map') return;
+  G.menuState = 'none';
+  document.getElementById('cityMapScreen').classList.add('hidden');
+  if(!isTouchDevice) safeRequestPointerLock(document.getElementById('gameCanvas'));
+}
+function toggleCityMap(){
+  if(!G.playing) return;
+  if(G.menuState==='none') openCityMap();
+  else if(G.menuState==='map') closeCityMap();
+}
+function fastTravelTo(barrioId){
+  const dest = G.barrios.find(b=>b.id===barrioId);
+  if(!dest || !dest.discovered) return;
+  document.getElementById('cityMapScreen').classList.add('hidden');
+  const loading = document.getElementById('travelLoading');
+  document.getElementById('travelLoadingText').textContent = 'Viajando a '+dest.name+'...';
+  loading.classList.add('show');
+  sfxReload();
+  setTimeout(()=>{
+    const pl = G.player;
+    pl.group.position.set(dest.x+3, 0, dest.z+3);
+    pl.velY = 0; pl.grounded = true;
+    G.vehicle.mounted = false;
+    if(!dest.detailBuilt) buildBarrioDetail(dest); // never arrive into an empty shell
+    refreshGlobalBuildingLists();
+    loading.classList.remove('show');
+    G.menuState = 'none';
+    if(!isTouchDevice) safeRequestPointerLock(document.getElementById('gameCanvas'));
+  }, 900);
+}
+
 /* ---------- Camera rotation helper ----------
    Applies a raw pixel-delta (from mouse movementX/Y, or from a touch/mouse
    drag delta) to the camera's TARGET yaw/pitch, using the sensitivity from
@@ -789,6 +1476,8 @@ function setupInput(){
       case 'Digit3': switchWeapon('escopeta'); break;
       case 'KeyR': tryReload(); break;
       case 'KeyB': toggleShop(); break;
+      case 'KeyM': toggleCityMap(); break;
+      case 'KeyE': tryInteract(); break;
     }
   });
   window.addEventListener('keyup', e=>{
@@ -918,10 +1607,13 @@ function setupTouchControls(){
   ['pointerup','pointercancel','pointerleave'].forEach(ev=>fireBtn.addEventListener(ev, ()=>{ G.input.mouseDown=false; }));
 
   jumpBtn.addEventListener('pointerdown', e=>{ e.preventDefault(); tryJump(); });
+  document.getElementById('interactBtn').addEventListener('pointerdown', e=>{ e.preventDefault(); tryInteract(); });
 
   bindTap(document.getElementById('pauseBtnTouch'), requestPause);
   bindTap(document.getElementById('shopBtnTouch'), toggleShop);
   bindTap(document.getElementById('reloadBtn'), tryReload);
+  bindTap(document.getElementById('mapBtnTouch'), toggleCityMap);
+  bindTap(document.getElementById('closeCityMapBtn'), closeCityMap);
   document.querySelectorAll('.wkey[data-w]').forEach(btn=>{
     bindTap(btn, ()=> switchWeapon(btn.dataset.w));
   });
@@ -981,7 +1673,8 @@ function updateCameraSmoothing(dt){
 
 function updateFollowCamera(){
   const p = G.player.group.position;
-  const yaw=G.camYaw, pitch=G.camPitch, dist=G.camDist;
+  // Pull the camera back a bit while riding so there's room to see the road at speed.
+  const yaw=G.camYaw, pitch=G.camPitch, dist=G.vehicle.mounted ? G.camDist*1.35 : G.camDist;
   const offX = Math.sin(yaw)*Math.cos(pitch)*dist;
   const offZ = Math.cos(yaw)*Math.cos(pitch)*dist;
   const offY = Math.sin(pitch)*dist + 2.6;
@@ -1010,6 +1703,16 @@ function updateFollowCamera(){
 
   G.camera.position.set(camX,camY,camZ);
   G.camera.lookAt(p.x, p.y+1.35, p.z);
+
+  // The sky dome and the sun's shadow frustum are both sized/shaped for a
+  // "local" area around the viewer rather than the whole (now very large)
+  // map — recenter them here every frame so they always surround wherever
+  // the player has wandered to instead of only working near the origin.
+  if(G.skyMesh) G.skyMesh.position.copy(G.camera.position);
+  if(G.sunLight){
+    G.sunLight.position.set(p.x+120, 180, p.z+90);
+    G.sunLight.target.position.set(p.x, 0, p.z);
+  }
 }
 
 function resolveBuildingCollision(x,z,radius){
@@ -1042,7 +1745,7 @@ function updatePlayer(dt){
   mx += fx*(-G.input.jy) + rx*G.input.jx;
   mz += fz*(-G.input.jy) + rz*G.input.jx;
   let len = Math.hypot(mx,mz);
-  const speed = (G.input.run || len>0.85) ? 7.6 : 4.6;
+  const speed = G.vehicle.mounted ? G.vehicle.speed : ((G.input.run || len>0.85) ? 7.6 : 4.6);
   if(len>1){ mx/=len; mz/=len; len=1; }
   let nx = pl.group.position.x + mx*speed*dt;
   let nz = pl.group.position.z + mz*speed*dt;
@@ -1378,11 +2081,15 @@ function drawMinimap(){
   ctx.clearRect(0,0,150,150);
   ctx.fillStyle='rgba(10,20,10,.9)';
   ctx.fillRect(0,0,150,150);
-  const scale = 150/620;
+  const scale = 150/(MAP_HALF*2.05);
   G.barrios.forEach(b=>{
     const cx=75+b.x*scale, cz=75+b.z*scale, s=Math.max(6,b.size*scale);
-    ctx.fillStyle = b.owned ? '#ffd700' : '#'+new THREE.Color(b.color).getHexString();
-    ctx.globalAlpha = b.owned?0.9:0.55;
+    if(!b.discovered){
+      ctx.fillStyle = '#555'; ctx.globalAlpha = 0.35;
+    } else {
+      ctx.fillStyle = b.owned ? '#ffd700' : '#'+new THREE.Color(b.color).getHexString();
+      ctx.globalAlpha = b.owned?0.9:0.55;
+    }
     ctx.fillRect(cx-s/2, cz-s/2, s, s);
   });
   ctx.globalAlpha=1;
@@ -1503,6 +2210,7 @@ function respawnPlayer(){
   pl.hp = Math.round(pl.maxHp*0.5);
   pl.group.position.set(0,0,6);
   pl.velY=0; pl.grounded=true;
+  G.vehicle.mounted = false; // falling off/dying always dismounts
   G.menuState='none';
   document.getElementById('gameOverScreen').classList.add('hidden');
   if(!isTouchDevice) safeRequestPointerLock(document.getElementById('gameCanvas'));
@@ -1592,6 +2300,7 @@ function resetGame(){
     b.enemyList.length=0;
     if(!b.home){
       b.owned=false;
+      b.discovered=false;
       b.zoneMesh.material.color.set(b.color);
       b.flagMesh.material.color.set(b.color);
       spawnBarrioEnemies(b);
@@ -1605,6 +2314,10 @@ function resetGame(){
   pl.weapon='pistola'; pl.cooldown=0; pl.reloading=false; pl.dead=false;
   pl.group.position.set(0,0,10);
   pl.velY=0; pl.grounded=true;
+
+  G.vehicle.mounted = false;
+  G.vehicle.group.position.set(10,0,14);
+  document.getElementById('cityMapScreen').classList.add('hidden');
 
   G.camYaw=0; G.camPitch=.28; G.camYawTarget=0; G.camPitchTarget=.28;
   G.startTime = performance.now();
@@ -1625,13 +2338,21 @@ function animate(){
   try{
     const dt = Math.min(0.05, G.clock.getDelta());
 
+    // Keeps looping the city even while a menu is open or before Play — cheap
+    // and makes the world feel alive rather than paused mid-air.
+    if(G.monorail) updateMonorail(dt);
+
     if(!G.playing){
       updateOrbitCamera(dt);
     } else if(G.menuState==='none'){
       updatePlayer(dt);
+      updateVehicle();
       updateEnemies(dt);
       updateProjectiles(dt);
       updateEconomy(dt);
+      updateWorldStreaming(dt);
+      updateDiscovery();
+      updateInteractionHint();
       updateCameraSmoothing(dt);
       updateFollowCamera();
       updatePopups(dt);
