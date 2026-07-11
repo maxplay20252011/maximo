@@ -1267,13 +1267,32 @@ function makeSeededRandom(seed){
    sign glow), treeDensity (extra trees scattered through the blocks, not
    just the park), carPalette for parked cars, and a graffiti flag (only
    Barrio Sur, per "evitando que toda la ciudad tenga el mismo estilo"). */
+// Palettes below are lifted straight from the district design brief (real-world
+// refs: Nordelta/Puerto Madero for Norte, La Boca/Barracas for Sur, Parque
+// Patricios-tech/Shenzhen for Este, GBA oeste/rust-belt for Oeste, Microcentro/
+// Catalinas for Central). `brickWalls` flags districts that should get the
+// procedural brick facade texture (see makeBrickTexture) instead of a flat
+// painted box; `towerFacade` flags the two "skyscraper" districts that get a
+// full 4-sided glass curtain-wall texture plus a cosmetic rooftop tower
+// extension (see instantiateBuildingMesh) so the skyline reads as far taller
+// than the 1-3 real interior floors the interior generator actually builds.
 const DISTRICT_IDENTITY = {
   plaza:        { heightRange:[4,10],  wallPalette:[0xcfc6ae,0xbfb6a0,0xd8d2c2,0x8a7355], roofPalette:[0x3a352c,0x4a4034], accentColor:0xffd700, parkSize:1.25, blockCount:3, treeDensity:1.0, carPalette:[0x1a1a20,0x8a1c24,0xd8d2c2], graffiti:false },
-  residencialAlto: { heightRange:[5,11], wallPalette:[0xf2efe6,0xe6e0d0,0xd6cdb8,0xb8a888], roofPalette:[0x3a3228,0x241f18,0x4a4438], accentColor:0xffffff, parkSize:1.6, blockCount:4, treeDensity:1.6, carPalette:[0x161618,0xd8d8dc,0x8a1c24,0x1c3a5a], graffiti:false },
-  industrial:   { heightRange:[6,13],  wallPalette:[0x8a8078,0x6e645a,0x9c3a2e,0x74716b,0x4a4a52], roofPalette:[0x2e3238,0x3a2020,0x1e2226], accentColor:0xe8c94a, parkSize:0.55, blockCount:5, treeDensity:0.3, carPalette:[0x4a5560,0xb8321c,0x6b6b6b], graffiti:true },
-  comercial:    { heightRange:[6,16],  wallPalette:[0xd8dce2,0xb8c4cc,0x8a9aa4,0xe8ecf0,0x5c6e78], roofPalette:[0x2e343a,0x24282c], accentColor:0xff3d7a, parkSize:0.85, blockCount:5, treeDensity:0.9, carPalette:[0xd63d3d,0x3d8bff,0xffe138,0xd8d2c2,0x1a1a20], graffiti:false },
-  residencialMedio: { heightRange:[3,6], wallPalette:[0xc8a878,0xb08c5c,0xe8ddc4,0xd6cab0,0x8a6f52], roofPalette:[0x8c3a28,0x6e2c1e,0x9c4530], accentColor:0xe6c65c, parkSize:1.4, blockCount:5, treeDensity:1.2, carPalette:[0xd8d2c2,0x3d5aff,0x6b6b6b,0x8a1c24], graffiti:false },
-  financiero:   { heightRange:[16,40], wallPalette:[0x9ab0c0,0xb8c8d4,0x7c8c98,0xd8e0e6,0x3c4450], roofPalette:[0x24282c,0x1c1e22], accentColor:0x4ad6ff, parkSize:0.7, blockCount:4, treeDensity:0.9, carPalette:[0x161618,0xffd700,0xd8d8dc], graffiti:false },
+  // Norte — Los Elegantes: blanco/gris claro, madera clara, negro mate en
+  // aberturas, luz cálida. Clean minimalist suburb, no grime.
+  residencialAlto: { heightRange:[5,11], wallPalette:[0xf5f5f0,0xd8d8d2,0xece8de,0xc9a876], roofPalette:[0x2a2a2a,0x333333,0x242424], accentColor:0xf2e6c9, parkSize:1.6, blockCount:4, treeDensity:1.6, carPalette:[0x161618,0xd8d8dc,0x8a1c24,0x1c3a5a], graffiti:false },
+  // Sur — Los Pesados: ladrillo visto, hormigón sucio, óxido, chapa oxidada,
+  // murales de gran escala curados (not random vandalism tags).
+  industrial:   { heightRange:[6,13],  wallPalette:[0x8b4a3a,0x6b6b63,0xb5541e,0x74645a,0x5a3a2e], roofPalette:[0x3a2418,0x4a2e1e,0x2e2018], accentColor:0xd6742a, parkSize:0.55, blockCount:5, treeDensity:0.3, carPalette:[0x4a5560,0xb8321c,0x6b6b6b], graffiti:true, brickWalls:true, muralStyle:'curated' },
+  // Este — Los Tecnológicos: negro/blanco frío, vidrio curtain wall, neón
+  // azul eléctrico. Full glass towers, the most "alive" skyline at night.
+  comercial:    { heightRange:[6,16],  wallPalette:[0x0d0d0f,0x14141a,0x1a1a22,0x24242c], roofPalette:[0x08080a,0x101014], accentColor:0x00d4ff, accentColor2:0x8b5cf6, parkSize:0.85, blockCount:5, treeDensity:0.6, carPalette:[0xd63d3d,0x3d8bff,0xffe138,0xd8d2c2,0x1a1a20], graffiti:false, towerFacade:true },
+  // Oeste — Los Rebeldes: ladrillo rojo crudo sin revocar, chapa gris,
+  // verde oxidado en portones, tierra ocre, grafitis rústicos (not curated).
+  residencialMedio: { heightRange:[3,6], wallPalette:[0x9c4a3c,0x8a8a82,0x6b5842,0xb2604a,0x7a5040], roofPalette:[0x5a3a28,0x6b4a30,0x4a3220], accentColor:0x6b8a5a, parkSize:1.4, blockCount:5, treeDensity:1.2, carPalette:[0xd8d2c2,0x3d5aff,0x6b6b6b,0x8a1c24], graffiti:true, brickWalls:true, muralStyle:'rustic' },
+  // Central — La Guardia del Rey: piedra clara, vidrio espejado, acentos
+  // dorados, seguridad negra. Tallest, brightest, most-watched district.
+  financiero:   { heightRange:[16,40], wallPalette:[0xe8e4d8,0xdcd6c4,0x3a4a5a,0x4a5a6a,0xc8c2b0], roofPalette:[0x1e2228,0x24282e], accentColor:0xc9a227, parkSize:0.7, blockCount:4, treeDensity:0.9, carPalette:[0x161618,0xffd700,0xd8d8dc], graffiti:false, towerFacade:true },
 };
 
 /* ============================================================
@@ -1319,6 +1338,12 @@ const BUILDING_TYPES = {
   panaderia:       {name:'Panadería',        archetype:'small',  income:3,  color:0xd6a44a, furn:'dine'},
   centroComunitario:{name:'Centro Comunitario', archetype:'medium', income:5, color:0xe6c65c, furn:'office'},
   municipalidad:   {name:'Municipalidad',    archetype:'huge',   income:26, color:0xe8ecf0, furn:'office'},
+  // Este landmarks per the brief ("torre corporativa central" / "centro de
+  // datos") — regular DISTRICT_BUILDING_POOL draws, not force-placed like a
+  // boss lair, but their glass-tower colors make them read as skyline
+  // anchors once instantiateBuildingMesh's towerFacade shaft kicks in.
+  torreCorporativa: {name:'Torre Corporativa', archetype:'huge',  income:32, color:0x00d4ff, furn:'office'},
+  centroDatos:      {name:'Centro de Datos',   archetype:'large', income:24, color:0x8b5cf6, furn:'office'},
   // Boss lairs ("Edificio Final") — never part of a DISTRICT_BUILDING_POOL
   // random draw, always force-placed exactly once per district by
   // generateDistrictBuildings via BOSS_LAIR_DEFS.
@@ -1333,11 +1358,11 @@ const BUILDING_TYPES = {
 // — so it's deliberately absent from these random-draw pools.)
 const DISTRICT_BUILDING_POOL = {
   plaza:            ['tienda','restaurante','oficina','cafeteria'], // home district: decorative only, never conquerable
-  residencialAlto:  ['casa','departamento','cafeteria','restaurante','gimnasio','oficina','banco'],
+  residencialAlto:  ['casa','departamento','cafeteria','restaurante','gimnasio','oficina','banco','escuela'],
   industrial:       ['galpon','fabrica','taller','estacionamiento','gasolinera','casa'],
-  comercial:        ['tienda','supermercado','hotel','restaurante','cine','centroComercial','estacionamiento'],
+  comercial:        ['tienda','supermercado','hotel','restaurante','cine','centroComercial','estacionamiento','oficina','torreCorporativa','centroDatos'],
   residencialMedio: ['casa','escuela','tienda','farmacia','panaderia','centroComunitario'],
-  financiero:       ['banco','oficina','hotel','centroComercial','restaurante'],
+  financiero:       ['banco','oficina','hotel','centroComercial','restaurante','comisaria'],
 };
 const FURNITURE_SETS = {
   home:       ['bed','sofa','table','shelf'],
@@ -1617,6 +1642,54 @@ function makeChurchLandmark(){
   crossH.position.set(0,9.9,5.4); g.add(crossH);
   return g;
 }
+/* Wall-mounted security camera — Norte ("zona vigilada") and Central
+   ("seguridad de alta densidad") street furniture. A small red status LED
+   (emissive) is the only detail that reads at a distance. */
+function makeSecurityCamera(){
+  const g = new THREE.Group();
+  const armMat = new THREE.MeshStandardMaterial({color:0x1a1a1a, metalness:.5, roughness:.4});
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,.5,6), armMat);
+  arm.rotation.z = Math.PI/2.4; arm.position.set(-.18,.08,0); g.add(arm);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(.16,.16,.34), armMat);
+  body.position.set(0,0,0); g.add(body);
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,.06,10), new THREE.MeshStandardMaterial({color:0x0a0a0a, metalness:.7}));
+  lens.rotation.x = Math.PI/2; lens.position.set(0,0,.2); g.add(lens);
+  const led = new THREE.Mesh(new THREE.SphereGeometry(.02,6,6), new THREE.MeshStandardMaterial({color:0xff2222, emissive:0xff2222, emissiveIntensity:1}));
+  led.position.set(.05,.06,.17); g.add(led);
+  return g;
+}
+
+/* Glowing barrel fire — Oeste's "sensación de frontera sin ley" night
+   lighting, an emissive cone standing in for flame plus a real PointLight
+   so it actually lights up the immediate street at night, matching the
+   brief's "fogatas y luces improvisadas" atmosphere note. */
+function makeBarrelFire(){
+  const g = new THREE.Group();
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(.35,.3,.6,10), new THREE.MeshStandardMaterial({color:0x3a3a38, metalness:.4, roughness:.7}));
+  barrel.position.y=.3; barrel.castShadow=true; g.add(barrel);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(.28,.55,8), new THREE.MeshBasicMaterial({color:0xff8c2a, transparent:true, opacity:.85}));
+  flame.position.y=.85; g.add(flame);
+  const glow = new THREE.PointLight(0xff6a1a, 1.4, 9, 2);
+  glow.position.y=.9; g.add(glow);
+  return g;
+}
+
+/* Golden retractable-style barrier — Central's "vallas retráctiles" +
+   institutional gold accent around the plaza, echoing the family's own
+   gold emblem/conquest color so the district reads as "the prize". */
+function makeVallaDorada(length){
+  const g = new THREE.Group();
+  const postMat = new THREE.MeshStandardMaterial({color:0x14141a, metalness:.6, roughness:.3});
+  const railMat = new THREE.MeshStandardMaterial({color:0xc9a227, metalness:.7, roughness:.25});
+  [-length/2, length/2].forEach(x=>{
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,1.0,8), postMat);
+    post.position.set(x,.5,0); g.add(post);
+  });
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,length,8), railMat);
+  rail.rotation.z = Math.PI/2; rail.position.y=.75; g.add(rail);
+  return g;
+}
+
 /* Random graffiti tag — only ever used in Barrio Sur (see DISTRICT_IDENTITY
    industrial.graffiti), applied as a decal-like plane on a building's side
    wall, so the rest of the city stays clean per "evitando que toda la
@@ -1967,7 +2040,7 @@ function buildBarrioDetail(barrio){
   if(barrio.id==='central') spawnCentralAllies(barrio, plazaR);
   const occupied = barrio.buildings.map(b=>({x:b.x, z:b.z, hw:b.w/2+1, hd:b.d/2+1}));
   scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, occupied);
-  scatterDistrictLandmarks(barrio, rand, half, identity);
+  scatterDistrictLandmarks(barrio, rand, half, plazaR, identity);
 }
 
 /* Central's 5 standing companions (see CENTRAL_ALLIES) — spread around the
@@ -2045,13 +2118,26 @@ function scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, i
   const density = PED_DENSITY[barrio.layout] || 1;
   const pedCount = Math.round((4+rand()*3)*density);
   spawnPedestrians(barrio, rand, pedCount, plazaR);
+
+  // Security cameras on the plaza ring — Norte's "zona vigilada" identity
+  // and Central's "seguridad de alta densidad" (more of them, per the brief).
+  if(barrio.layout==='residencialAlto' || barrio.layout==='financiero'){
+    const count = barrio.layout==='financiero' ? 8 : 4;
+    for(let i=0;i<count;i++){
+      const a=(i/count)*Math.PI*2+rand()*0.3, r=plazaR+3.2;
+      const cam = makeSecurityCamera();
+      cam.position.set(barrio.x+Math.cos(a)*r, 3.2, barrio.z+Math.sin(a)*r);
+      cam.rotation.y = a+Math.PI;
+      barrio.detailGroup.add(cam);
+    }
+  }
 }
 
 /* District-specific landmark scenery — the parts of the brief that belong
    to ONE particular barrio's character (chimneys/containers/rail spur +
    graffiti for Sur, fountain/monument/billboards for Central,
    church/sports court for Oeste) rather than every district alike. */
-function scatterDistrictLandmarks(barrio, rand, half, identity){
+function scatterDistrictLandmarks(barrio, rand, half, plazaR, identity){
   if(barrio.layout==='industrial'){
     const edgeA = rand()*Math.PI*2;
     const ex = barrio.x+Math.cos(edgeA)*half*0.85, ez = barrio.z+Math.sin(edgeA)*half*0.85;
@@ -2073,18 +2159,6 @@ function scatterDistrictLandmarks(barrio, rand, half, identity){
       cont.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
       barrio.detailGroup.add(cont);
     }
-    // Graffiti tags on a handful of building side walls — only here, per
-    // "evitando que toda la ciudad tenga el mismo estilo".
-    if(identity.graffiti && barrio.buildings){
-      barrio.buildings.forEach(b=>{
-        if(rand()<0.3){
-          const tag = makeGraffitiPlane(Math.min(b.d*0.7,4), Math.min(b.h*0.5,2.6), rand);
-          tag.position.set(b.x-b.w/2-0.03, b.h*0.3, b.z);
-          tag.rotation.y = -Math.PI/2;
-          barrio.detailGroup.add(tag);
-        }
-      });
-    }
   } else if(barrio.layout==='financiero'){
     const fountain = makeFountain();
     fountain.position.set(barrio.x, 0, barrio.z);
@@ -2101,6 +2175,16 @@ function scatterDistrictLandmarks(barrio, rand, half, identity){
       bb.rotation.y = a+Math.PI;
       barrio.detailGroup.add(bb);
     }
+    // Golden retractable barriers ringing the plaza, echoing the family's
+    // own gold emblem color — "vallas retráctiles" + reinforces Central as
+    // the most-guarded, most-prized district on the map.
+    for(let i=0;i<6;i++){
+      const a=(i/6)*Math.PI*2+0.4, r=plazaR+2.2;
+      const valla = makeVallaDorada(3.4);
+      valla.position.set(barrio.x+Math.cos(a)*r, 0, barrio.z+Math.sin(a)*r);
+      valla.rotation.y = a+Math.PI/2;
+      barrio.detailGroup.add(valla);
+    }
   } else if(barrio.layout==='residencialMedio'){
     const church = makeChurchLandmark();
     const cA = rand()*Math.PI*2, cD = half*0.55;
@@ -2112,6 +2196,32 @@ function scatterDistrictLandmarks(barrio, rand, half, identity){
     court.position.set(barrio.x+Math.cos(sA)*sD, 0, barrio.z+Math.sin(sA)*sD);
     court.rotation.y = rand()*Math.PI*2;
     barrio.detailGroup.add(court);
+    // Barrel fires scattered through the baldíos — "fogatas y luces
+    // improvisadas... sensación de frontera sin ley" at night.
+    for(let i=0;i<4;i++){
+      const a=rand()*Math.PI*2, d=half*(0.25+rand()*0.55);
+      const fire = makeBarrelFire();
+      fire.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
+      barrio.detailGroup.add(fire);
+    }
+  }
+
+  // Graffiti/murals on a handful of building side walls — Sur gets bigger
+  // "arte curado" pieces, Oeste gets smaller scrappier tags (muralStyle in
+  // DISTRICT_IDENTITY), everyone else stays clean per "evitando que toda la
+  // ciudad tenga el mismo estilo".
+  if(identity.graffiti && barrio.buildings){
+    const curated = identity.muralStyle==='curated';
+    barrio.buildings.forEach(b=>{
+      if(rand()<(curated?0.35:0.22)){
+        const w = curated ? Math.min(b.d*0.85,5.5) : Math.min(b.d*0.5,2.8);
+        const h = curated ? Math.min(b.h*0.6,3.4) : Math.min(b.h*0.4,1.9);
+        const tag = makeGraffitiPlane(w, h, rand);
+        tag.position.set(b.x-b.w/2-0.03, b.h*0.3, b.z);
+        tag.rotation.y = -Math.PI/2;
+        barrio.detailGroup.add(tag);
+      }
+    });
   }
 }
 
@@ -2220,21 +2330,50 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
    that reads as glass/masonry instead of a solid painted box. glowColor is
    the district's accent (warm incandescent for homes, cool LED for the
    financial district, neon for the commercial strip, etc). */
-function makeWindowGridTexture(cols, rows, glowColor){
+function makeWindowGridTexture(cols, rows, glowColor, glowColor2){
   const cw=28, ch=28;
   const c = document.createElement('canvas');
   c.width = Math.max(1,cols)*cw; c.height = Math.max(1,rows)*ch;
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#26262c'; ctx.fillRect(0,0,c.width,c.height);
   const glow = '#'+new THREE.Color(glowColor).getHexString();
+  const glow2 = glowColor2!=null ? '#'+new THREE.Color(glowColor2).getHexString() : null;
   for(let r=0;r<rows;r++){
     for(let cI=0;cI<cols;cI++){
       const lit = Math.random()<0.4;
-      ctx.fillStyle = lit ? glow : (Math.random()<0.5?'#3a4650':'#2c343c');
+      const litColor = glow2 && Math.random()<0.5 ? glow2 : glow;
+      ctx.fillStyle = lit ? litColor : (Math.random()<0.5?'#3a4650':'#2c343c');
       ctx.fillRect(cI*cw+4, r*ch+4, cw-8, ch-9);
     }
   }
   const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+
+/* Procedural brick-course texture for Sur/Oeste facades (see brickWalls in
+   DISTRICT_IDENTITY) — a running-bond brick pattern with mortar lines and
+   light per-brick tint variance, used as the main wall material's map
+   instead of a flat painted color. Cheap (one canvas per building, same
+   cost tier as makeWindowGridTexture) and tileable via repeat.set(). */
+function makeBrickTexture(baseColor){
+  const bw=24, bh=12;
+  const cols=8, rows=8;
+  const c = document.createElement('canvas');
+  c.width = cols*bw; c.height = rows*bh;
+  const ctx = c.getContext('2d');
+  const base = new THREE.Color(baseColor);
+  ctx.fillStyle = '#'+shadeColor(baseColor,-0.35).toString(16).padStart(6,'0'); // mortar
+  ctx.fillRect(0,0,c.width,c.height);
+  for(let r=0;r<rows;r++){
+    const offset = (r%2)*(bw/2);
+    for(let x=-bw; x<c.width+bw; x+=bw){
+      const tint = base.clone().offsetHSL(0,0,(Math.random()-.5)*0.08);
+      ctx.fillStyle = '#'+tint.getHexString();
+      ctx.fillRect(x+offset+1, r*bh+1, bw-2, bh-2);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
 
@@ -2254,7 +2393,14 @@ function instantiateBuildingMesh(b){
   const roofCol = b.owned ? 0xb8960a : identity.roofPalette[Math.floor(matRand()*identity.roofPalette.length)];
   const col = b.owned ? 0xffd700 : type.color; // kept as the type's own "brand" accent — sign, emblem, trim
 
-  const bMesh = new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,b.d), new THREE.MeshStandardMaterial({color:wallCol, roughness:.82}));
+  // Sur/Oeste get a real brick-course texture on the walls instead of a flat
+  // color (see DISTRICT_IDENTITY.brickWalls); conquered buildings stay flat
+  // gold so ownership always reads clearly regardless of district material.
+  const wallMat = (identity.brickWalls && !b.owned)
+    ? new THREE.MeshStandardMaterial({map:makeBrickTexture(wallCol), roughness:.92})
+    : new THREE.MeshStandardMaterial({color:wallCol, roughness:.82});
+  if(wallMat.map){ wallMat.map.repeat.set(Math.max(1,Math.round(b.w/3)), Math.max(1,Math.round(b.h/2))); }
+  const bMesh = new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,b.d), wallMat);
   bMesh.position.set(b.x,b.h/2,b.z);
   bMesh.castShadow=true; bMesh.receiveShadow=true;
   bMesh.userData.building = b;
@@ -2268,12 +2414,14 @@ function instantiateBuildingMesh(b){
   plinth.receiveShadow=true;
   b.barrio.detailGroup.add(plinth);
 
-  // Window grid on the two long faces, for anything with more than one
-  // floor's worth of height — reads as glass/openings instead of a slab.
+  // Window grid — Este/Central (towerFacade) are full glass curtain-wall
+  // towers, so all 4 faces get windows and the neon glow mixes the
+  // district's two accent colors; everyone else only gets front/back glass
+  // (still reads as openings without paying for a texture on every face).
   if(b.h>5.5){
     const cols = Math.max(2, Math.round(b.w/2.6));
     const rows = Math.max(1, Math.round((b.h-plinthH)/3.1));
-    const winTex = makeWindowGridTexture(cols, rows, identity.accentColor);
+    const winTex = makeWindowGridTexture(cols, rows, identity.accentColor, identity.towerFacade?identity.accentColor2:null);
     const winMat = new THREE.MeshBasicMaterial({map:winTex});
     const frontWin = new THREE.Mesh(new THREE.PlaneGeometry(b.w*0.92, (b.h-plinthH)*0.82), winMat);
     frontWin.position.set(b.x, plinthH+(b.h-plinthH)*0.5, b.z+b.d/2+0.03);
@@ -2281,11 +2429,58 @@ function instantiateBuildingMesh(b){
     const backWin = frontWin.clone();
     backWin.position.z = b.z-b.d/2-0.03; backWin.rotation.y = Math.PI;
     b.barrio.detailGroup.add(backWin);
+    if(identity.towerFacade){
+      const sideCols = Math.max(2, Math.round(b.d/2.6));
+      const sideTex = makeWindowGridTexture(sideCols, rows, identity.accentColor, identity.accentColor2);
+      const sideMat = new THREE.MeshBasicMaterial({map:sideTex});
+      const leftWin = new THREE.Mesh(new THREE.PlaneGeometry(b.d*0.92, (b.h-plinthH)*0.82), sideMat);
+      leftWin.position.set(b.x-b.w/2-0.03, plinthH+(b.h-plinthH)*0.5, b.z); leftWin.rotation.y = -Math.PI/2;
+      b.barrio.detailGroup.add(leftWin);
+      const rightWin = leftWin.clone();
+      rightWin.position.x = b.x+b.w/2+0.03; rightWin.rotation.y = Math.PI/2;
+      b.barrio.detailGroup.add(rightWin);
+    }
   }
 
   const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w*.75,.5,b.d*.75), new THREE.MeshStandardMaterial({color:roofCol}));
   roof.position.set(b.x,b.h+.25,b.z); roof.castShadow=true;
   b.barrio.detailGroup.add(roof);
+
+  // Cosmetic-only rooftop tower shaft for Este/Central skyscrapers, tall
+  // enough buildings only (large/huge archetypes, floors>=2) — the interior
+  // generator still only builds the real 1-3 floors (see BUILDING_ARCHETYPES;
+  // the brief itself only expects "1-2 pisos clave" to be explorable per
+  // tower), this just sells a 15-30 story skyline from outside. Purely
+  // visual: no new AABB, no new floor, no collision change — the shaft sits
+  // entirely above the existing footprint AABB pushed below.
+  if(identity.towerFacade && !b.owned && b.floors>=2){
+    const extraH = b.h*(1.4+matRand()*2.2);
+    const shaftW = b.w*0.62, shaftD = b.d*0.62;
+    const shaftMat = new THREE.MeshStandardMaterial({color:shadeColor(wallCol,-0.15), roughness:.3, metalness:.6});
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(shaftW, extraH, shaftD), shaftMat);
+    shaft.position.set(b.x, b.h+extraH/2, b.z);
+    shaft.castShadow=true;
+    b.barrio.detailGroup.add(shaft);
+    const shaftRows = Math.max(3, Math.round(extraH/3.1));
+    const shaftTex = makeWindowGridTexture(3, shaftRows, identity.accentColor, identity.accentColor2);
+    const shaftWinMat = new THREE.MeshBasicMaterial({map:shaftTex});
+    [
+      {ry:0,          w:shaftW, dx:0,               dz: shaftD/2+0.02},
+      {ry:Math.PI/2,  w:shaftD, dx: shaftW/2+0.02,   dz:0},
+      {ry:Math.PI,    w:shaftW, dx:0,               dz:-shaftD/2-0.02},
+      {ry:-Math.PI/2, w:shaftD, dx:-shaftW/2-0.02,   dz:0},
+    ].forEach(f=>{
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(f.w*0.94, extraH*0.9), shaftWinMat);
+      face.position.set(b.x+f.dx, b.h+extraH/2, b.z+f.dz);
+      face.rotation.y = f.ry;
+      b.barrio.detailGroup.add(face);
+    });
+    const spire = new THREE.Mesh(new THREE.CylinderGeometry(.08,.2,extraH*0.18,6), new THREE.MeshStandardMaterial({color:0x1a1a1a, metalness:.7}));
+    spire.position.set(b.x, b.h+extraH+extraH*0.09, b.z);
+    b.barrio.detailGroup.add(spire);
+    b.towerShaft = shaft;
+  }
+
   // door (visual): a dark inset on the south wall, at ground level
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.6,2.4,.1), new THREE.MeshStandardMaterial({color:0x120e0a}));
   door.position.set(b.x, 1.2, b.z+b.d/2+0.06);
