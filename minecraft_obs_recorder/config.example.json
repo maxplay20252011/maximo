@@ -1,0 +1,29 @@
+{
+  "obs": {
+    "host": "localhost",
+    "port": 4455,
+    "password": "PONE_ACA_TU_PASSWORD_DE_OBS_WEBSOCKET",
+    "scene_name": "Minecraft"
+  },
+  "hotkeys": {
+    "start": "f9",
+    "stop": "f10",
+    "pause_resume": "f11"
+  },
+  "output": {
+    "base_dir": "C:/Grabaciones/Minecraft",
+    "min_free_space_gb": 15
+  },
+  "clip": {
+    "enabled": true,
+    "duration_seconds": 45
+  },
+  "logging": {
+    "log_file": "app.log",
+    "session_log_file": "sessions.csv"
+  },
+  "reconnect": {
+    "retry_interval_seconds": 5,
+    "max_retries": 12
+  }
+}
