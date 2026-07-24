@@ -1306,16 +1306,16 @@ const DISTRICT_IDENTITY = {
   plaza:        { heightRange:[4,10],  wallPalette:[0xcfc6ae,0xbfb6a0,0xd8d2c2,0x8a7355], roofPalette:[0x3a352c,0x4a4034], accentColor:0xffd700, parkSize:1.25, blockCount:3, treeDensity:1.0, carPalette:[0x1a1a20,0x8a1c24,0xd8d2c2], graffiti:false },
   // Norte — Los Elegantes: blanco/gris claro, madera clara, negro mate en
   // aberturas, luz cálida. Clean minimalist suburb, no grime.
-  residencialAlto: { heightRange:[5,11], wallPalette:[0xf5f5f0,0xd8d8d2,0xece8de,0xc9a876], roofPalette:[0x2a2a2a,0x333333,0x242424], accentColor:0xf2e6c9, parkSize:1.6, blockCount:4, treeDensity:1.6, carPalette:[0x161618,0xd8d8dc,0x8a1c24,0x1c3a5a], graffiti:false },
+  residencialAlto: { heightRange:[5,11], wallPalette:[0xf5f5f0,0xd8d8d2,0xece8de,0xc9a876], roofPalette:[0x3a3a38,0x333333,0x242424], accentColor:0xf2e6c9, parkSize:1.6, blockCount:4, treeDensity:1.6, carPalette:[0x161618,0xd8d8dc,0x8a1c24,0x1c3a5a], graffiti:false },
   // Sur — Los Pesados: ladrillo visto, hormigón sucio, óxido, chapa oxidada,
   // murales de gran escala curados (not random vandalism tags).
-  industrial:   { heightRange:[6,13],  wallPalette:[0x8b4a3a,0x6b6b63,0xb5541e,0x74645a,0x5a3a2e], roofPalette:[0x3a2418,0x4a2e1e,0x2e2018], accentColor:0xd6742a, parkSize:0.55, blockCount:5, treeDensity:0.3, carPalette:[0x4a5560,0xb8321c,0x6b6b6b], graffiti:true, brickWalls:true, muralStyle:'curated' },
+  industrial:   { heightRange:[6,13],  wallPalette:[0x8b4a3a,0x6b6b63,0xb5541e,0x74645a,0x2b2b26], roofPalette:[0x3a2418,0x4a2e1e,0x2e2018], accentColor:0xd6742a, parkSize:0.55, blockCount:5, treeDensity:0.3, carPalette:[0x4a5560,0xb8321c,0x6b6b6b], graffiti:true, brickWalls:true, muralStyle:'curated' },
   // Este — Los Tecnológicos: negro/blanco frío, vidrio curtain wall, neón
   // azul eléctrico. Full glass towers, the most "alive" skyline at night.
-  comercial:    { heightRange:[6,16],  wallPalette:[0x0d0d0f,0x14141a,0x1a1a22,0x24242c], roofPalette:[0x08080a,0x101014], accentColor:0x00d4ff, accentColor2:0x8b5cf6, parkSize:0.85, blockCount:5, treeDensity:0.6, carPalette:[0xd63d3d,0x3d8bff,0xffe138,0xd8d2c2,0x1a1a20], graffiti:false, towerFacade:true },
+  comercial:    { heightRange:[6,16],  wallPalette:[0x0d0d0f,0x14141a,0x1a1a22,0xeaeaef], roofPalette:[0x08080a,0x2a3a4a], accentColor:0x00d4ff, accentColor2:0x8b5cf6, parkSize:0.85, blockCount:5, treeDensity:0.6, carPalette:[0xd63d3d,0x3d8bff,0xffe138,0xd8d2c2,0x1a1a20], graffiti:false, towerFacade:true },
   // Oeste — Los Rebeldes: ladrillo rojo crudo sin revocar, chapa gris,
   // verde oxidado en portones, tierra ocre, grafitis rústicos (not curated).
-  residencialMedio: { heightRange:[3,6], wallPalette:[0x9c4a3c,0x8a8a82,0x6b5842,0xb2604a,0x7a5040], roofPalette:[0x5a3a28,0x6b4a30,0x4a3220], accentColor:0x6b8a5a, parkSize:1.4, blockCount:5, treeDensity:1.2, carPalette:[0xd8d2c2,0x3d5aff,0x6b6b6b,0x8a1c24], graffiti:true, brickWalls:true, muralStyle:'rustic' },
+  residencialMedio: { heightRange:[3,6], wallPalette:[0x9c4a3c,0x8a8a82,0x6b5842,0xb2604a,0xc4a26b], roofPalette:[0x5a3a28,0x6b4a30,0x4a3220], accentColor:0x5c7a5e, parkSize:1.4, blockCount:5, treeDensity:1.2, carPalette:[0xd8d2c2,0x3d5aff,0x6b6b6b,0x8a1c24], graffiti:true, brickWalls:true, muralStyle:'rustic' },
   // Central — La Guardia del Rey: piedra clara, vidrio espejado, acentos
   // dorados, seguridad negra. Tallest, brightest, most-watched district.
   financiero:   { heightRange:[16,40], wallPalette:[0xe8e4d8,0xdcd6c4,0x3a4a5a,0x4a5a6a,0xc8c2b0], roofPalette:[0x1e2228,0x24282e], accentColor:0xc9a227, parkSize:0.7, blockCount:4, treeDensity:0.9, carPalette:[0x161618,0xffd700,0xd8d8dc], graffiti:false, towerFacade:true },
@@ -1389,6 +1389,24 @@ const DISTRICT_BUILDING_POOL = {
   comercial:        ['tienda','supermercado','hotel','restaurante','cine','centroComercial','estacionamiento','oficina','torreCorporativa','centroDatos'],
   residencialMedio: ['casa','escuela','tienda','farmacia','panaderia','centroComunitario'],
   financiero:       ['banco','oficina','hotel','centroComercial','restaurante','comisaria'],
+};
+// Guaranteed per-type minimums from the district design brief's building
+// counts (§1.2/2.2/3.2/4.2/5.2) — force-placed FIRST in generateDistrictBuildings,
+// same mechanism as the boss lair, before any leftover budget draws randomly
+// from DISTRICT_BUILDING_POOL above. The brief names a few types this game
+// doesn't have a dedicated model for; mapped to the closest existing
+// BUILDING_TYPES entry rather than inventing new interior archetypes:
+// "tienda electrónica"->tienda, "minimercado"->supermercado, "colegio"->escuela.
+// Norte's "club deportivo" isn't duplicated here — clubSocialNorte (Lucas's
+// boss lair, force-placed separately via BOSS_LAIR_DEFS) already covers that
+// slot by name and theme. Each district's total (minimums + boss lair) lands
+// within 1 of the brief's explorable-building count.
+const DISTRICT_BUILDING_MINIMUMS = {
+  residencialAlto:  [ {type:'escuela',count:1}, {type:'gasolinera',count:1}, {type:'supermercado',count:1}, {type:'panaderia',count:1}, {type:'farmacia',count:1}, {type:'tienda',count:1}, {type:'gimnasio',count:1}, {type:'cafeteria',count:1}, {type:'casa',count:14} ], // single-count landmarks first, while space is still open — casa:14 (the flexible, numerous type) goes last to soak up whatever's left. 22 + clubSocialNorte lair = 23 (brief: 24)
+  industrial:       [ {type:'casa',count:9}, {type:'galpon',count:5}, {type:'fabrica',count:1} ], // 15 + fabricaAbandonada lair = 16 (brief: 17)
+  comercial:        [ {type:'casa',count:6}, {type:'torreCorporativa',count:3}, {type:'centroDatos',count:1} ], // 10 + centroTecnologico lair = 11 (brief: 10)
+  residencialMedio: [ {type:'casa',count:10}, {type:'taller',count:3} ], // 13 + depositoFerroviario lair = 14 (brief: 15)
+  financiero:       [ {type:'banco',count:1}, {type:'comisaria',count:1}, {type:'torreCorporativa',count:4} ], // 6 + municipalidad (Dante's lair) = 7 (brief: 8)
 };
 const FURNITURE_SETS = {
   home:       ['bed','sofa','table','shelf'],
@@ -1705,7 +1723,7 @@ function makeBarrelFire(){
    gold emblem/conquest color so the district reads as "the prize". */
 function makeVallaDorada(length){
   const g = new THREE.Group();
-  const postMat = new THREE.MeshStandardMaterial({color:0x14141a, metalness:.6, roughness:.3});
+  const postMat = new THREE.MeshStandardMaterial({color:0x1a1a1a, metalness:.6, roughness:.3});
   const railMat = new THREE.MeshStandardMaterial({color:0xc9a227, metalness:.7, roughness:.25});
   [-length/2, length/2].forEach(x=>{
     const post = new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,1.0,8), postMat);
@@ -2299,7 +2317,11 @@ function updatePedestrians(dt){
    objects — called ONLY once per district, ever. */
 function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, parkR){
   const pool = DISTRICT_BUILDING_POOL[barrio.layout] || DISTRICT_BUILDING_POOL.plaza;
-  const targetCount = 8 + Math.floor(rand()*5); // ~8-12 real, conquerable buildings per district
+  // Small random top-up on top of the guaranteed minimums below (was the
+  // ONLY source of buildings before DISTRICT_BUILDING_MINIMUMS existed —
+  // now just adds a little variety/replay value, since the minimums already
+  // carry most of each district's target building count).
+  const targetCount = 2 + Math.floor(rand()*3);
   const placed = [];
   const buildings = [];
   const GAP = 6;
@@ -2343,6 +2365,16 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
   // BOSS_LAIR_DEFS. It's never part of the random DISTRICT_BUILDING_POOL draw.
   const lair = BOSS_LAIR_DEFS[barrio.id];
   if(lair) placeOne(lair.type, {isBossLair:true, bossKey:lair.bossKey}, 50);
+
+  // Guaranteed per-type minimums from the design brief (see
+  // DISTRICT_BUILDING_MINIMUMS) — placed next, while the plot is still
+  // mostly empty, with a generous try budget since some districts ask for
+  // 20+ buildings in a ~130-unit-wide plot and later placements have fewer
+  // free gaps to land in. Some may still fail to fit in the driest corners;
+  // that's the same silent-drop behavior the random pool fill below already
+  // had, just applied to the brief's explicit counts first.
+  const minimums = DISTRICT_BUILDING_MINIMUMS[barrio.layout] || [];
+  minimums.forEach(m=>{ for(let i=0;i<m.count;i++) placeOne(m.type, null, 80); });
 
   for(let i=0; i<targetCount; i++){
     const typeKey = pool[Math.floor(rand()*pool.length)];
