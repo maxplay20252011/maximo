@@ -102,8 +102,34 @@ button{font-family:inherit;cursor:pointer;border:none;outline:none;touch-action:
   font-size:1.1rem;padding:6px 14px;cursor:pointer;}
 #pauseBtnTouch:active{transform:translateX(-50%) scale(.92);}
 
-/* ===== Touch controls (mobile) ===== */
-body.touch-mode #weaponPanel{bottom:100px;}
+/* ===== Touch controls (mobile) =====
+   weaponPanel used to wrap to 2-3 rows and sit centered mid-screen, right on
+   top of the fire/jump/interact buttons (#hud stacks above #touchControls,
+   so a .wkey button landing on a touch button's screen area would silently
+   steal its taps) and over the player/crosshair. Now a single slim
+   horizontal-scroll row (all 7 buttons rarely fit — that's fine, it scrolls)
+   left-anchored instead of centered. Where it sits vertically differs by
+   orientation: portrait has enough height to stack it above the whole
+   fire/jump/interact cluster (tallest reach: jumpBtn at bottom:258px);
+   landscape doesn't (would collide with the top stat panel instead), but
+   has plenty of spare width, so there it just sits at the same bottom edge
+   as the buttons, stopping short of their column. */
+body.touch-mode #weaponPanel{left:8px; transform:none; width:max-content;
+  flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto;
+  -webkit-overflow-scrolling:touch; gap:5px; padding:6px 10px;}
+body.touch-mode #weaponPanel .wkey{padding:4px 7px;font-size:.68rem;min-width:26px;margin:0;flex:none;}
+body.touch-mode #weaponName{font-size:.75rem;white-space:nowrap;}
+body.touch-mode #ammoText{font-size:.78rem;white-space:nowrap;}
+@media (orientation:portrait){
+  body.touch-mode #weaponPanel{bottom:266px; max-width:calc(100vw - 16px);}
+}
+@media (orientation:landscape){
+  body.touch-mode #weaponPanel{bottom:10px; max-width:calc(100vw - 190px);}
+  /* barrioList normally sits at bottom:18px too — clear of the weaponPanel
+     in portrait (which is way up at bottom:266px there) but not here, since
+     landscape's weaponPanel shares the same bottom edge. */
+  body.touch-mode #barrioList{bottom:74px;}
+}
 #touchControls{position:fixed;inset:0;z-index:22;display:none;pointer-events:none;}
 body.touch-mode #touchControls{display:block;}
 #lookZone{position:absolute;inset:0;pointer-events:auto;touch-action:none;}
