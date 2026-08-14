@@ -489,3 +489,62 @@ def test_doctor_detecta_dos_regimenes_abiertos(tmp_path):
 
     checks = {c.nombre: c for c in doctor_mod.run_all(db_path)}
     assert checks["regimenes"].estado == "FALLA"
+
+
+# --------------------------------------------------------------------------
+# Dashboard
+# --------------------------------------------------------------------------
+
+
+def test_dashboard_de_base_vacia_dice_que_no_midio_nada(tmp_path):
+    from report import dashboard as dash_mod
+
+    db_path = tmp_path / "dash.db"
+    conn, _ = dbmod.init_db(db_path)
+    try:
+        archivo = dash_mod.write(conn, str(db_path), str(tmp_path / "dist"))
+    finally:
+        conn.close()
+
+    pagina = archivo.read_text(encoding="utf-8")
+    assert "No constituye asesoramiento financiero" in pagina
+    assert "n_efectivo=0" in pagina
+    assert "SIN MEDIR" in pagina
+    assert "Ningun resultado esta verificado contra datos de mercado reales" in pagina
+    # Las secciones de §11 que no se pueden construir aparecen declaradas.
+    assert "Mapa de exposiciones" in pagina
+    assert "<!doctype html>" in pagina
+
+
+def test_el_dashboard_muestra_n_y_n_efectivo_juntos(tmp_path):
+    """§15: nunca uno sin el otro."""
+    from report import dashboard as dash_mod
+
+    db_path = tmp_path / "dash2.db"
+    conn, _ = dbmod.init_db(db_path)
+    try:
+        insert_event(conn)
+        insert_call(conn, call_id="c1", horizon="5d")
+        conn.execute(
+            "INSERT INTO call_results (call_id, realized_return, hit, brier_contribution) VALUES ('c1', 0.03, 1, 0.14)"
+        )
+        datos = dash_mod.gather(conn, str(db_path))
+    finally:
+        conn.close()
+
+    cal = datos["calibracion"]
+    assert cal["n"] == 1
+    assert cal["evaluables"] == 1
+    assert cal["n_efectivo"] == 0          # 1 observacion / horizonte 5d
+    assert cal["estado"] == "MUESTRA INSUFICIENTE"
+
+
+def test_el_dashboard_marca_las_bases_de_demo(tmp_path):
+    from report import dashboard as dash_mod
+
+    db_path = tmp_path / "demo.db"
+    conn, _ = dbmod.init_db(db_path)
+    try:
+        assert dash_mod.gather(conn, str(db_path))["es_demo"] is True
+    finally:
+        conn.close()

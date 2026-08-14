@@ -48,8 +48,13 @@ echo "==> Guardas anti-look-ahead"
 if [ "${1:-}" = "--demo" ]; then
   echo "==> Demo con datos sinteticos"
   .venv/bin/python run.py demo
+  .venv/bin/python run.py --db data/demo.db report --output dist/demo
 fi
 
+echo "==> Dashboard"
+.venv/bin/python run.py report
+
 echo
-echo "Listo. Diagnostico:"
-echo "    source .venv/bin/activate && python run.py doctor"
+echo "Listo."
+echo "    Abri dist/index.html con doble clic."
+echo "    Diagnostico: source .venv/bin/activate && python run.py doctor"

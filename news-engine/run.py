@@ -688,5 +688,38 @@ def demo_cmd(
     console.print(f"Para explorarla: python run.py --db {resumen['db']} regimes timeline")
 
 
+@app.command("report")
+def report_cmd(
+    ctx: typer.Context,
+    output: str = typer.Option("dist", "--output", "-o"),
+    serve: int = typer.Option(0, "--serve", help="Levanta un servidor local en este puerto"),
+) -> None:
+    """Genera el dashboard HTML (§11). Es un archivo suelto: abre con doble clic."""
+    from report import dashboard as dash_mod
+
+    path = dbmod.resolve_db_path(_db_path(ctx))
+    if not path.exists():
+        console.print(f"[red]no existe la base:[/red] {path}  (corre: python run.py db init)")
+        raise typer.Exit(code=1)
+
+    conn = dbmod.connect(path)
+    try:
+        archivo = dash_mod.write(conn, str(path), output)
+    finally:
+        conn.close()
+
+    console.print(f"dashboard: {archivo.resolve()}  ({archivo.stat().st_size / 1024:.0f} KB)")
+    console.print(f"abrilo con doble clic, o: file://{archivo.resolve()}")
+
+    if serve:
+        import http.server
+        import socketserver
+
+        handler = lambda *a, **kw: http.server.SimpleHTTPRequestHandler(*a, directory=output, **kw)  # noqa: E731
+        console.print(f"\n[green]servido en http://localhost:{serve}[/green]  (ctrl-c para cortar)")
+        with socketserver.TCPServer(("", serve), handler) as httpd:
+            httpd.serve_forever()
+
+
 if __name__ == "__main__":
     app()

@@ -20,7 +20,8 @@ en `MOTOR-NOTICIAS.md` / `CLAUDE.md`; este archivo solo explica cómo correrlo.
 | 5 | Matcher de análogos | Pendiente · **checkpoint crítico** |
 | 6 | Evaluación y estadística | Pendiente |
 | 7-8 | Ingesta, dedup y clasificación | Pendiente |
-| 9-13 | Narrativa, scoring, conectores, dashboard, operación | Pendiente |
+| 12 | Dashboard | Parcial · muestra el estado real y declara lo que falta |
+| 9-11, 13 | Narrativa, scoring, conectores, operación | Pendiente |
 
 **Nada está verificado contra datos de mercado reales.** Todo lo que pasa hoy pasa
 sobre series sintéticas construidas para que la respuesta correcta se sepa de
@@ -56,6 +57,31 @@ se frena todo.
 
 ---
 
+## Abrirlo
+
+```bash
+python run.py report
+```
+
+Genera `dist/index.html`: **un archivo suelto que abre con doble clic**. Sin
+servidor, sin CDN, sin fuentes remotas. Muestra, en el orden fijo de §11:
+
+1. El header de calibración obligatorio — hit rate, n y n_efectivo juntos, Brier
+   contra el baseline 0.25, y las limitaciones conocidas. Hoy dice `SIN MEDIR`,
+   porque no hay un solo call evaluado y eso es la verdad.
+2. Estado del sistema: qué anda, qué falta, qué comando lo corrige.
+3. Régimen vigente y línea de tiempo.
+4. Alertas de severidad 5 en crédito o geopolítica.
+5. Archivo de eventos con cobertura de outcomes.
+6. Mayores movimientos medidos, en las dos direcciones.
+7. Candidatos de autodetección pendientes de revisión.
+8. **Las secciones de §11 que todavía no se pueden construir**, con la tarea de
+   la que dependen. Un dashboard que muestra seis paneles bonitos y omite que el
+   motor de scoring no existe es peor que no tener dashboard.
+
+Si preferís servirlo: `python run.py report --serve 8000` y abrí
+`http://localhost:8000`.
+
 ## Ver que funciona, sin red ni credenciales
 
 ```bash
@@ -81,9 +107,13 @@ con semilla fija. Sirve para ver que las piezas encajan, nada más.
 Para explorarla:
 
 ```bash
+python run.py --db data/demo.db report --output dist/demo   # y abrí dist/demo/index.html
 python run.py --db data/demo.db regimes timeline
 python run.py --db data/demo.db seed stats
 ```
+
+El dashboard de una base de demo lleva un cartel de datos sintéticos arriba de
+todo, para que no se confunda con el real.
 
 ---
 
@@ -166,7 +196,8 @@ python run.py seed outcomes --all | --event-id lehman-2008
 python run.py seed autodetect --from 2010-01-01
 python run.py seed review --limit 20
 
-# operación
+# reporte y operación
+python run.py report [--output dist] [--serve 8000]
 python run.py doctor | healthcheck | demo
 ```
 
@@ -194,6 +225,7 @@ cuántas semanas tiene que durar un cambio para contar como episodio, se toca
 
 ```
 core/     db.py (SQLite + migraciones) · clock.py (reloj inyectable) · doctor.py
+report/   dashboard.py (HTML de §11, sin dependencias)
 pit/      guards.py (as_of y anti-look-ahead) · prices.py · macro.py · market_state.py
 classify/ regime.py · event_types.py
 history/  seed.py (corpus) · outcomes.py (medición) · archive.py (autodetección)
