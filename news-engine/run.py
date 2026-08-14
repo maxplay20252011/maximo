@@ -605,5 +605,88 @@ def seed_stats(ctx: typer.Context) -> None:
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# operacion (§C.7)
+# ---------------------------------------------------------------------------
+
+_COLOR = {"OK": "green", "AVISO": "yellow", "FALLA": "red", "PENDIENTE": "cyan"}
+
+
+@app.command("doctor")
+def doctor(
+    ctx: typer.Context,
+    red: bool = typer.Option(False, "--red", help="Prueba tambien la conectividad a las fuentes"),
+) -> None:
+    """Diagnostico completo: que anda, que falta y que hacer."""
+    from core import doctor as doctor_mod
+
+    checks = doctor_mod.run_all(_db_path(ctx), red=red)
+    table = Table("chequeo", "estado", "detalle")
+    for check in checks:
+        table.add_row(check.nombre, f"[{_COLOR[check.estado]}]{check.estado}[/]", check.detalle)
+    console.print(table)
+
+    fallas = [c for c in checks if c.bloqueante]
+    pendientes = [c for c in checks if c.estado == "PENDIENTE"]
+    if pendientes:
+        console.print(f"[cyan]{len(pendientes)} piezas pendientes[/cyan]: son etapas todavia no construidas o sin correr.")
+    if fallas:
+        console.print(f"[red]{len(fallas)} fallas bloqueantes.[/red]")
+        raise typer.Exit(code=1)
+    console.print("[green]sin fallas bloqueantes.[/green]")
+
+
+@app.command("healthcheck")
+def healthcheck(ctx: typer.Context) -> None:
+    """Para el cron: exit 1 si algo esta roto o desactualizado (§C.6)."""
+    from core import doctor as doctor_mod
+
+    checks = doctor_mod.healthcheck(_db_path(ctx))
+    problemas = [c for c in checks if c.estado in ("FALLA", "AVISO")]
+    for check in problemas:
+        console.print(f"[{_COLOR[check.estado]}]{check.estado}[/] {check.nombre}: {check.detalle}")
+    if any(c.bloqueante for c in checks):
+        raise typer.Exit(code=1)
+    if not problemas:
+        console.print("[green]ok[/green]")
+
+
+@app.command("demo")
+def demo_cmd(
+    ctx: typer.Context,
+    db: str = typer.Option(None, "--db-demo", help="Base de la demo (default: data/demo.db)"),
+) -> None:
+    """Corre la cadena completa sobre datos INVENTADOS, en una base aparte.
+
+    Sirve para ver que las piezas encajan sin red ni API key. No sirve para
+    mirar los numeros: los precios son un paseo aleatorio.
+    """
+    import demo as demo_mod
+    from pit import market_state as ms_mod
+
+    console.print(f"[yellow]{demo_mod.AVISO}[/yellow]\n")
+    universe = ms_mod.load_universe(_universe_path(ctx))
+    thresholds = _full_thresholds(ctx)
+
+    resumen = demo_mod.build(
+        universe, thresholds,
+        db_path=db or demo_mod.DEMO_DB,
+        on_progress=lambda paso: console.print(f"  · {paso}"),
+    )
+
+    console.print()
+    table = Table("etapa", "resultado")
+    table.add_row("precios sinteticos", f"{resumen['cierres']} cierres")
+    table.add_row("macro sintetica", f"{resumen['observaciones_macro']} observaciones con vintages")
+    table.add_row("regimenes", f"{resumen['episodios_regimen']} episodios · {resumen['cambios_descartados']} cambios descartados")
+    table.add_row("corpus semilla", f"{resumen['eventos']} eventos · market_state {resumen['cobertura_market_state']:.0%}")
+    table.add_row("outcomes", " · ".join(f"{k} {v}" for k, v in sorted(resumen["outcomes"].items())))
+    table.add_row("autodeteccion", f"{resumen['candidatos']} candidatos, 0 promovidos (sin archivo de noticias)")
+    console.print(table)
+    console.print(f"\nbase de la demo: {resumen['db']}  (el archivo real quedo intacto)")
+    console.print(f"[yellow]{demo_mod.AVISO}[/yellow]")
+    console.print(f"Para explorarla: python run.py --db {resumen['db']} regimes timeline")
+
+
 if __name__ == "__main__":
     app()

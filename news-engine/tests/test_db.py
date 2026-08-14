@@ -439,3 +439,53 @@ def test_la_migracion_003_conserva_las_filas(tmp_path):
         assert {"idx_ev_type_date", "idx_calls_eval", "idx_outcomes_asset"} <= set(dbmod.index_names(conn))
     finally:
         conn.close()
+
+
+# --------------------------------------------------------------------------
+# Diagnostico
+# --------------------------------------------------------------------------
+
+
+def test_doctor_distingue_pendiente_de_falla(tmp_path):
+    from core import doctor as doctor_mod
+
+    db_path = tmp_path / "doc.db"
+    conn, _ = dbmod.init_db(db_path)
+    conn.close()
+
+    checks = doctor_mod.run_all(db_path)
+    por_nombre = {c.nombre: c for c in checks}
+
+    assert por_nombre["schema"].estado == "OK"
+    assert por_nombre["guardas anti-look-ahead"].estado == "OK"
+    assert por_nombre["integridad"].estado == "OK"
+    # Base vacia: etapas sin correr, no fallas.
+    assert por_nombre["precios"].estado == "PENDIENTE"
+    assert por_nombre["corpus"].estado == "PENDIENTE"
+    assert not [c for c in checks if c.bloqueante]
+
+
+def test_doctor_falla_si_no_existe_la_base(tmp_path):
+    from core import doctor as doctor_mod
+
+    checks = doctor_mod.run_all(tmp_path / "no-existe.db")
+    assert any(c.bloqueante for c in checks)
+
+
+def test_doctor_detecta_dos_regimenes_abiertos(tmp_path):
+    from core import doctor as doctor_mod
+
+    db_path = tmp_path / "doc.db"
+    conn, _ = dbmod.init_db(db_path)
+    try:
+        insert_regime(conn, "r1", start="2022-01-01", end=None)
+        # Segundo abierto: el indice unico parcial lo impide, asi que se fuerza
+        # el estado inconsistente reabriendo uno cerrado por SQL directo.
+        insert_regime(conn, "r2", start="2022-06-01", end="2022-12-31")
+        conn.execute("DROP INDEX idx_regimes_single_open")
+        conn.execute("UPDATE regimes SET end_date = NULL WHERE regime_id = 'r2'")
+    finally:
+        conn.close()
+
+    checks = {c.nombre: c for c in doctor_mod.run_all(db_path)}
+    assert checks["regimenes"].estado == "FALLA"
