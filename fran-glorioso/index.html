@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#87A9C4">
+<!-- Favicon embebido: sin archivo no hay 404 de favicon.ico, que es el único
+     que ensucia la consola en un proyecto sin assets externos (§11). -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2387A9C4'/%3E%3Crect x='11' y='7' width='10' height='18' rx='5' fill='%233B7DD8' stroke='%231A1A1A' stroke-width='2'/%3E%3C/svg%3E">
+<title>Fran Glorioso — Vertical Slice · Barrio Norte</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Roboto+Condensed:wght@700&display=swap" rel="stylesheet">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   §8 — HUD. Todos los valores de color y dimensión salen de la
+   Especificación Visual Técnica. No inventar ninguno acá.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root{
+  /* §8 colores */
+  --vida:#D84343;
+  --escudo:#3B9DD8;
+  --stamina:#5CC94A;
+  --barra-fondo:rgba(26,26,26,.5);      /* #1A1A1A @ .5 */
+  --barra-borde:rgba(255,255,255,.3);   /* #FFFFFF @ .3 */
+  --texto:#FFFFFF;
+  --sombra-texto:#000000;
+  /* §8 rarezas */
+  --r-comun:#9E9E9E; --r-poco:#4CAF50; --r-rara:#2196F3;
+  --r-epica:#9C27B0; --r-legendaria:#FFB300; --r-mitica:#E53935;
+  /* §1 cielo, para que el fondo del documento no destelle en gris al cargar */
+  --cielo:#87A9C4;
+  /* §8 tipografía */
+  --f-general:'Inter','Segoe UI',system-ui,sans-serif;
+  --f-numeros:'Roboto Condensed','Arial Narrow',sans-serif;
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;background:var(--cielo);}
+body{
+  font-family:var(--f-general);
+  color:var(--texto);
+  -webkit-user-select:none;user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:none;
+}
+#escena{display:block;width:100vw;height:100vh;}
+
+.txt{text-shadow:0 1px 0 var(--sombra-texto),0 2px 6px rgba(0,0,0,.85);}
+
+/* ── Barras: 200×16 (vida/escudo) y 200×8 (stamina), margen 20px ───────── */
+#hud{
+  position:fixed;top:calc(20px + env(safe-area-inset-top));
+  left:calc(20px + env(safe-area-inset-left));
+  z-index:20;pointer-events:none;
+}
+.barra{
+  width:200px;height:16px;
+  background:var(--barra-fondo);
+  border:2px solid var(--barra-borde);
+  border-radius:3px;overflow:hidden;position:relative;
+}
+.barra + .barra{margin-top:4px;}
+.barra.fina{height:8px;}
+.relleno{
+  position:absolute;inset:0;width:100%;transform-origin:left center;
+  transition:transform .12s linear;
+}
+#vida    .relleno{background:var(--vida);}
+#escudo  .relleno{background:var(--escudo);}
+#stamina .relleno{background:var(--stamina);transition:transform .06s linear;}
+
+/* Chispa de daño reciente: queda atrás del relleno y se retrae más lento. */
+.fantasma{
+  position:absolute;inset:0;width:100%;transform-origin:left center;
+  background:rgba(255,255,255,.45);
+  transition:transform .5s ease-out .18s;
+}
+
+.etiquetas{
+  display:flex;gap:8px;align-items:baseline;margin-bottom:6px;
+  font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+}
+.etiquetas .cifra{font-family:var(--f-numeros);font-size:15px;letter-spacing:.02em;}
+
+/* ── Arma equipada: el borde usa el color de rareza (§8) ───────────────── */
+#arma{
+  margin-top:12px;display:flex;align-items:center;gap:9px;
+  background:var(--barra-fondo);border-radius:6px;padding:6px 10px 6px 6px;
+  width:max-content;
+}
+#arma .icono{
+  width:34px;height:34px;border-radius:5px;border:2px solid var(--r-comun);
+  display:grid;place-items:center;font-size:17px;background:rgba(0,0,0,.35);
+}
+#arma .nombre{font-size:12px;font-weight:600;letter-spacing:.06em;}
+#arma .rareza{font-size:10px;letter-spacing:.14em;text-transform:uppercase;opacity:.85;}
+[data-rareza="comun"]      .icono{border-color:var(--r-comun);}
+[data-rareza="pocoComun"]  .icono{border-color:var(--r-poco);}
+[data-rareza="rara"]       .icono{border-color:var(--r-rara);}
+[data-rareza="epica"]      .icono{border-color:var(--r-epica);}
+[data-rareza="legendaria"] .icono{border-color:var(--r-legendaria);}
+[data-rareza="mitica"]     .icono{border-color:var(--r-mitica);}
+[data-rareza="comun"]      .rareza{color:var(--r-comun);}
+[data-rareza="pocoComun"]  .rareza{color:var(--r-poco);}
+[data-rareza="rara"]       .rareza{color:var(--r-rara);}
+[data-rareza="epica"]      .rareza{color:var(--r-epica);}
+[data-rareza="legendaria"] .rareza{color:var(--r-legendaria);}
+[data-rareza="mitica"]     .rareza{color:var(--r-mitica);}
+
+/* ── Objetivo / oleada, arriba a la derecha ────────────────────────────── */
+/* Va debajo del engranaje, no al lado del HUD: en pantallas angostas la barra
+   de vida (200px + 20px de margen) llega hasta el centro y se pisarían. */
+#objetivo{
+  position:fixed;top:calc(66px + env(safe-area-inset-top));
+  right:calc(20px + env(safe-area-inset-right));
+  z-index:20;text-align:right;pointer-events:none;
+}
+#objetivo .titulo{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.8;}
+#objetivo .cuenta{font-family:var(--f-numeros);font-size:30px;line-height:1;}
+
+/* ── Números de daño flotantes (§8: familia condensada) ────────────────── */
+#capa-danio{position:fixed;inset:0;z-index:19;pointer-events:none;overflow:hidden;}
+.danio{
+  position:absolute;font-family:var(--f-numeros);font-size:22px;font-weight:700;
+  text-shadow:0 2px 4px #000;will-change:transform,opacity;
+}
+.danio.critico{font-size:30px;}
+.danio.recibido{color:var(--vida);}
+
+/* ── Controles táctiles (§8) ───────────────────────────────────────────── */
+#tactil{position:fixed;inset:0;z-index:25;pointer-events:none;display:none;}
+body.tactil #tactil{display:block;}
+
+#joystick{
+  position:absolute;
+  left:calc(28px + env(safe-area-inset-left));
+  bottom:calc(28px + env(safe-area-inset-bottom));
+  width:120px;height:120px;border-radius:50%;
+  background:rgba(26,26,26,.5);border:2px solid var(--barra-borde);
+  opacity:.5;pointer-events:auto;touch-action:none;
+}
+#stick{
+  position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;
+  background:rgba(255,255,255,.55);border:2px solid rgba(255,255,255,.7);
+}
+
+#botones{
+  position:absolute;
+  right:calc(24px + env(safe-area-inset-right));
+  bottom:calc(28px + env(safe-area-inset-bottom));
+  display:grid;grid-template-columns:repeat(2,70px);gap:14px;
+  pointer-events:none;
+}
+.boton{
+  width:70px;height:70px;border-radius:50%;
+  background:rgba(26,26,26,.55);border:2px solid var(--barra-borde);
+  color:var(--texto);font-family:var(--f-general);font-size:11px;font-weight:800;
+  letter-spacing:.1em;text-transform:uppercase;
+  display:grid;place-items:center;align-content:center;gap:2px;
+  opacity:.6;pointer-events:auto;touch-action:none;transition:opacity .08s,transform .08s;
+}
+.boton .glifo{font-size:22px;}
+.boton.activo{opacity:.9;transform:scale(.94);}
+#btn-esquivar{grid-column:1;}
+#btn-atacar{grid-column:2;}
+#btn-correr{grid-column:2;width:70px;height:70px;}
+
+/* ── Menú de opciones (§10) ────────────────────────────────────────────── */
+#engranaje{
+  position:fixed;z-index:30;
+  top:calc(20px + env(safe-area-inset-top));
+  right:calc(20px + env(safe-area-inset-right));
+  width:38px;height:38px;border-radius:50%;
+  background:rgba(26,26,26,.5);border:2px solid var(--barra-borde);
+  color:var(--texto);font-size:17px;cursor:pointer;opacity:.6;
+}
+#engranaje:hover{opacity:.95;}
+
+#opciones{
+  position:fixed;inset:0;z-index:40;display:none;
+  place-items:center;background:rgba(10,14,20,.72);backdrop-filter:blur(4px);
+}
+#opciones.abierto{display:grid;}
+.panel{
+  width:min(360px,88vw);background:#12161C;
+  border:2px solid var(--barra-borde);border-radius:12px;padding:22px;
+}
+.panel h2{font-size:15px;letter-spacing:.18em;text-transform:uppercase;margin-bottom:4px;}
+.panel .sub{font-size:12px;opacity:.6;margin-bottom:18px;line-height:1.5;}
+.fila{margin-bottom:16px;}
+.fila > label{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.75;margin-bottom:8px;}
+.segmento{display:flex;gap:6px;}
+.segmento button{
+  flex:1;padding:10px 0;border-radius:7px;cursor:pointer;
+  background:rgba(255,255,255,.06);border:2px solid transparent;
+  color:var(--texto);font-family:var(--f-general);font-size:12px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;
+}
+.segmento button[aria-pressed="true"]{border-color:var(--stamina);background:rgba(92,201,74,.16);}
+.nota{font-size:11px;opacity:.55;line-height:1.5;margin-top:-6px;}
+.cerrar{
+  width:100%;margin-top:6px;padding:12px 0;border-radius:8px;cursor:pointer;
+  background:var(--stamina);border:none;color:#0B1310;
+  font-family:var(--f-general);font-size:13px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+}
+.ayuda{font-size:11px;opacity:.6;line-height:1.7;margin-top:14px;}
+.ayuda kbd{
+  font-family:var(--f-numeros);background:rgba(255,255,255,.12);
+  border-radius:4px;padding:1px 6px;margin-right:2px;
+}
+
+/* ── Overlay de rendimiento (§9) ───────────────────────────────────────── */
+#debug{
+  position:fixed;z-index:22;left:calc(20px + env(safe-area-inset-left));
+  bottom:calc(20px + env(safe-area-inset-bottom));
+  font-family:var(--f-numeros);font-size:12px;line-height:1.5;
+  background:rgba(26,26,26,.5);border-radius:6px;padding:8px 11px;
+  display:none;pointer-events:none;white-space:pre;
+}
+#debug.visible{display:block;}
+body.tactil #debug{bottom:calc(168px + env(safe-area-inset-bottom));}
+#debug .mal{color:var(--vida);}
+#debug .bien{color:var(--stamina);}
+
+/* ── Pantalla de inicio ────────────────────────────────────────────────── */
+#inicio{
+  position:fixed;inset:0;z-index:50;display:grid;place-items:center;
+  background:linear-gradient(180deg,#87A9C4 0%,#5D7E99 100%);text-align:center;padding:24px;
+}
+#inicio.oculto{display:none;}
+#inicio h1{font-size:clamp(2.4rem,9vw,4.2rem);letter-spacing:.06em;font-weight:800;line-height:.95;}
+#inicio .distrito{font-size:12px;letter-spacing:.34em;text-transform:uppercase;opacity:.85;margin-top:10px;}
+#inicio .jugar{
+  margin-top:28px;padding:15px 46px;border-radius:10px;border:none;cursor:pointer;
+  background:#F5F5F0;color:#1A1A1A;
+  font-family:var(--f-general);font-size:15px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;
+}
+#inicio .pie{margin-top:20px;font-size:11px;opacity:.75;line-height:1.8;}
+
+/* ── Muerte / victoria ─────────────────────────────────────────────────── */
+#fin{
+  position:fixed;inset:0;z-index:45;display:none;place-items:center;
+  background:rgba(10,14,20,.78);text-align:center;
+}
+#fin.visible{display:grid;}
+#fin h2{font-size:clamp(1.8rem,7vw,3rem);letter-spacing:.05em;}
+#fin p{margin-top:10px;font-size:13px;opacity:.75;}
+#fin button{
+  margin-top:24px;padding:13px 40px;border-radius:9px;border:none;cursor:pointer;
+  background:#F5F5F0;color:#1A1A1A;
+  font-family:var(--f-general);font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+}
+</style>
+
+<!-- Three.js r160 va versionado en vendor/: el juego arranca sin red y no
+     depende de que un CDN esté vivo. r160 > r142, que es lo que pide §3 para
+     CapsuleGeometry. Para volver al CDN, cambiar la ruta por
+     https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="escena"></canvas>
+
+<!-- ── HUD (§8) ─────────────────────────────────────────────────────────── -->
+<div id="hud">
+  <div class="etiquetas txt">
+    <span>Fran</span>
+    <span class="cifra" id="cifra-vida">100/100</span>
+  </div>
+  <div class="barra" id="vida">
+    <div class="fantasma"></div><div class="relleno"></div>
+  </div>
+  <div class="barra" id="escudo">
+    <div class="fantasma"></div><div class="relleno"></div>
+  </div>
+  <div class="barra fina" id="stamina">
+    <div class="relleno"></div>
+  </div>
+
+  <div id="arma" data-rareza="comun">
+    <div class="icono">✊</div>
+    <div>
+      <div class="nombre txt">Puños</div>
+      <div class="rareza">Común</div>
+    </div>
+  </div>
+</div>
+
+<div id="objetivo">
+  <div class="titulo txt">Enemigos</div>
+  <div class="cuenta txt" id="cuenta-enemigos">0</div>
+</div>
+
+<div id="capa-danio"></div>
+
+<!-- ── Controles táctiles (§8) ──────────────────────────────────────────── -->
+<div id="tactil">
+  <div id="joystick"><div id="stick"></div></div>
+  <div id="botones">
+    <button class="boton" id="btn-esquivar"><span class="glifo">↷</span>Esquivar</button>
+    <button class="boton" id="btn-atacar"><span class="glifo">✦</span>Atacar</button>
+    <button class="boton" id="btn-correr"><span class="glifo">»</span>Correr</button>
+  </div>
+</div>
+
+<button id="engranaje" title="Opciones">⚙</button>
+<div id="debug"></div>
+
+<!-- ── Opciones (§10) ───────────────────────────────────────────────────── -->
+<div id="opciones">
+  <div class="panel">
+    <h2>Opciones</h2>
+    <p class="sub">Barrio Norte — vertical slice</p>
+
+    <div class="fila">
+      <label for="calidad-baja">Calidad gráfica</label>
+      <div class="segmento" id="calidad">
+        <button id="calidad-baja"  data-nivel="baja">Baja</button>
+        <button id="calidad-media" data-nivel="media">Media</button>
+        <button id="calidad-alta"  data-nivel="alta">Alta</button>
+      </div>
+    </div>
+    <p class="nota" id="nota-calidad"></p>
+
+    <div class="fila">
+      <label>Rendimiento</label>
+      <div class="segmento">
+        <button id="toggle-debug" aria-pressed="false">Mostrar FPS</button>
+      </div>
+    </div>
+
+    <button class="cerrar" id="cerrar-opciones">Volver</button>
+
+    <p class="ayuda">
+      <kbd>WASD</kbd> mover · <kbd>Shift</kbd> correr · <kbd>Espacio</kbd> esquivar<br>
+      <kbd>Click</kbd> / <kbd>J</kbd> atacar · arrastrar para girar la cámara<br>
+      <kbd>F</kbd> panel de rendimiento · <kbd>V</kbd> checklist visual (§11)
+    </p>
+  </div>
+</div>
+
+<!-- ── Inicio ───────────────────────────────────────────────────────────── -->
+<div id="inicio">
+  <div>
+    <h1>FRAN<br>GLORIOSO</h1>
+    <p class="distrito">Barrio Norte · Los Elegantes</p>
+    <button class="jugar" id="btn-jugar">Jugar</button>
+    <p class="pie">
+      Vertical slice sobre geometría primitiva.<br>
+      Los colores y materiales son los definitivos.
+    </p>
+  </div>
+</div>
+
+<div id="fin">
+  <div>
+    <h2 id="fin-titulo">Te bajaron</h2>
+    <p id="fin-texto">El Barrio Norte no perdona.</p>
+    <button id="btn-reiniciar">Reintentar</button>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
