@@ -9,6 +9,15 @@
 # ^ para indices). Estan sin verificar contra la fuente: este entorno no tiene
 # salida a stooq. Verificar con `python run.py pit load-prices --dry-run`.
 
+# Hora UTC a la que cierra la sesion. Define, para un evento con hora conocida,
+# cual es el ultimo cierre anterior al evento: un evento a las 22:00Z del dia D
+# se mide desde el cierre de D; uno a las 13:00Z, desde el cierre de D-1.
+# 21:00Z es el cierre de EE.UU. en horario de invierno. En verano el cierre real
+# es 20:00Z, asi que la regla toma un cierre menos de los que existieron: el
+# error va hacia medir de menos, nunca hacia mirar el futuro.
+sesiones:
+  cierre_utc_default: "21:00"
+
 benchmarks:            # §6.3
   equity_us:     SPY
   equity_europa: EZU

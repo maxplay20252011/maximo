@@ -74,3 +74,28 @@ regimes:
     STRONG:  {min:  0.03}
     WEAK:    {max: -0.03}
     NEUTRAL: {default: true}
+
+# ---------------------------------------------------------------------------
+# Autodeteccion de episodios historicos (§6.2)
+# Cualquiera de estos umbrales dispara un candidato.
+# ---------------------------------------------------------------------------
+autodetect:
+  spx_abs_daily_return:   0.025   # |retorno diario del indice| > 2.5%
+  vix_daily_change:       0.30    # VIX +30% en el dia (§6.2 dice intradiario;
+                                  # con cierres diarios se mide cierre a cierre,
+                                  # que detecta menos, nunca de mas)
+  us10y_abs_change_bp:    20      # +-20 pb en un dia
+  hy_oas_change_bp:       50      # +50 pb en un dia
+  g10_abs_daily_return:   0.04    # |retorno diario| > 4% en un indice del G10
+  indices_g10: [SPX, EZU, EWJ, EWG]
+  news_window_hours: 24           # ventana hacia atras para buscar la causa
+  min_news_severity: 3
+
+# ---------------------------------------------------------------------------
+# Calculo de outcomes (§6.3)
+# ---------------------------------------------------------------------------
+outcomes:
+  horizontes_sesiones: [1, 5, 20]
+  ventana_vol_previa_sesiones: 20   # base de comparacion de vol_ratio_vs_prior
+  max_dias_hasta_t0: 5              # si el ultimo cierre previo esta mas lejos,
+                                    # el dato se marca STALE

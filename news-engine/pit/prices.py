@@ -243,6 +243,41 @@ def get_total_return_as_known_at(
     return (p1 + dividends) / p0 - 1.0
 
 
+def last_session_before(
+    conn: sqlite3.Connection,
+    asset: str,
+    moment: datetime,
+    *,
+    session_close: time,
+) -> date | None:
+    """Ultima sesion con cierre anterior al instante `moment`.
+
+    Un evento a las 22:00Z del dia D ocurre despues del cierre de D, asi que la
+    reaccion se mide desde el cierre de D. Uno a las 13:00Z ocurre antes, y se
+    mide desde el cierre de D-1. Sin esta distincion, la mitad de las ventanas de
+    outcome empiezan un dia antes e incluyen movimiento previo al evento.
+    """
+    limite = moment.date() if moment.timetz() > session_close.replace(tzinfo=timezone.utc) else (
+        moment.date() - timedelta(days=1)
+    )
+    row = conn.execute(
+        "SELECT price_date FROM prices WHERE asset = ? AND price_date <= ? ORDER BY price_date DESC LIMIT 1",
+        (asset, limite.isoformat()),
+    ).fetchone()
+    return date.fromisoformat(row["price_date"]) if row else None
+
+
+def trading_days_after(conn: sqlite3.Connection, asset: str, reference: date, count: int) -> list[date]:
+    """Fechas con cierre cargado posteriores a `reference`, mas antiguas primero."""
+    rows = conn.execute(
+        """SELECT price_date FROM prices
+           WHERE asset = ? AND price_date > ?
+           ORDER BY price_date LIMIT ?""",
+        (asset, reference.isoformat(), count),
+    ).fetchall()
+    return [date.fromisoformat(row["price_date"]) for row in rows]
+
+
 def trading_days_before(conn: sqlite3.Connection, asset: str, reference: date, count: int) -> list[date]:
     """Fechas con cierre cargado, hasta `reference` inclusive, mas recientes primero.
 

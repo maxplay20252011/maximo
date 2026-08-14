@@ -32,8 +32,10 @@ DIMENSIONS = ("rate_regime", "vol_regime", "inflation_regime", "usd_trend", "cre
 
 
 def load_thresholds(path: str = DEFAULT_THRESHOLDS_PATH) -> dict[str, Any]:
+    """Devuelve el documento entero de umbrales. Cada modulo indexa su seccion:
+    que unos reciban el documento y otros una rama era una trampa esperando."""
     with open(path, encoding="utf-8") as handle:
-        return yaml.safe_load(handle)["regimes"]
+        return yaml.safe_load(handle)
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,7 @@ def classify_at(
     de config. Sin `previous` no hay histeresis, que es lo correcto para una
     clasificacion suelta: no hay tramo vigente del que salir.
     """
+    thresholds = thresholds["regimes"] if "regimes" in thresholds else thresholds
     moment = datetime.combine(when, time(23, 59, 59), tzinfo=timezone.utc)
     inputs: dict[str, float | None] = {}
     anterior = previous or {}
@@ -288,8 +291,9 @@ def build_regimes(
     desde el inicio del episodio abierto, que es lo que hace el CLI.
     """
     report = BuildReport()
-    step = timedelta(days=thresholds["step_days"])
-    min_steps = int(thresholds.get("min_episode_steps", 1))
+    config = thresholds["regimes"] if "regimes" in thresholds else thresholds
+    step = timedelta(days=config["step_days"])
+    min_steps = int(config.get("min_episode_steps", 1))
 
     abierto = conn.execute("SELECT * FROM regimes WHERE end_date IS NULL").fetchone()
     label_actual = abierto["regime_label"] if abierto else None

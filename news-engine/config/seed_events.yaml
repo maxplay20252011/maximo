@@ -1,0 +1,255 @@
+# Corpus semilla: los 26 episodios de §6.1.
+#
+# SOBRE LAS HORAS. `hora_utc` no pretende precision al minuto. Esta elegida para
+# que caiga del lado correcto del cierre de mercado, que es lo unico que cambia
+# el calculo: un evento anterior al cierre del dia D se mide desde el cierre de
+# D-1 y reacciona en D; uno posterior al cierre de D se mide desde el cierre de D
+# y reacciona en D+1. Los casos donde eso importa (Brexit, eleccion 2016,
+# downgrade de 2011) estan marcados con `post_cierre: true`.
+#
+# Un episodio con la hora mal puesta mide la reaccion de un dia equivocado. Si
+# vas a refinar algo de este archivo, refina las horas antes que los titulares.
+
+eventos:
+
+  # ---------------------------------------------------------------- credito
+  - id: lehman-2008
+    fecha: 2008-09-15
+    hora_utc: "06:00"
+    tipo: CREDIT_EVENT
+    severidad: 5
+    titular: "Lehman Brothers se presenta en Capitulo 11"
+    descripcion: "Mayor quiebra de la historia de EE.UU. Sin rescate. Congela el mercado de financiamiento mayorista."
+    entidades: [LEH, XLF, USA]
+
+  - id: sp-downgrade-us-2011
+    fecha: 2011-08-05
+    hora_utc: "21:15"
+    post_cierre: true
+    tipo: REGULATORY_FISCAL
+    severidad: 5
+    titular: "S&P baja la calificacion soberana de EE.UU. de AAA a AA+"
+    descripcion: "Primera perdida del AAA estadounidense. Anunciado un viernes despues del cierre."
+    entidades: [USA, TLT, SPX]
+
+  - id: uk-gilt-ldi-2022
+    fecha: 2022-09-23
+    hora_utc: "08:30"
+    tipo: REGULATORY_FISCAL
+    severidad: 4
+    titular: "El Reino Unido anuncia un mini-presupuesto con recortes impositivos sin financiamiento"
+    descripcion: "Dispara la crisis de gilts y el desarme forzado de posiciones LDI de los fondos de pension."
+    entidades: [GBR, GBP, gilts]
+
+  - id: svb-2023
+    fecha: 2023-03-10
+    hora_utc: "16:00"
+    tipo: CREDIT_EVENT
+    severidad: 5
+    titular: "La FDIC interviene Silicon Valley Bank"
+    descripcion: "Mayor quiebra bancaria desde 2008. Corrida por depositos no asegurados y perdidas en cartera de bonos."
+    entidades: [SIVB, KRE, XLF]
+
+  - id: credit-suisse-ubs-2023
+    fecha: 2023-03-19
+    hora_utc: "18:00"
+    tipo: CREDIT_EVENT
+    severidad: 5
+    titular: "UBS compra Credit Suisse en una operacion forzada por el gobierno suizo"
+    descripcion: "Los bonos AT1 se escriben a cero antes que el capital accionario. Anunciado un domingo."
+    entidades: [CS, UBS, CHE, AT1]
+
+  # ------------------------------------------------------- politica monetaria
+  - id: taper-tantrum-2013
+    fecha: 2013-05-22
+    hora_utc: "14:00"
+    tipo: MONETARY_POLICY
+    severidad: 4
+    titular: "Bernanke menciona la posibilidad de reducir el ritmo de compras de activos"
+    descripcion: "Testimonio ante el Congreso. Dispara una suba abrupta de tasas largas y salida de emergentes."
+    entidades: [FED, TLT, EEM]
+
+  - id: fed-first-hike-2015
+    fecha: 2015-12-16
+    hora_utc: "19:00"
+    tipo: MONETARY_POLICY
+    severidad: 4
+    titular: "La Fed sube la tasa por primera vez desde 2006"
+    descripcion: "Fin de siete anios de tasa cero."
+    entidades: [FED, DXY, SHY]
+
+  - id: fed-unlimited-qe-2020
+    fecha: 2020-03-23
+    hora_utc: "12:00"
+    tipo: MONETARY_POLICY
+    severidad: 5
+    titular: "La Fed anuncia compras de activos sin limite y facilidades de credito corporativo"
+    descripcion: "Piso del selloff por COVID. Primera vez que la Fed compra deuda corporativa."
+    entidades: [FED, LQD, HYG, SPX]
+
+  - id: fed-hiking-start-2022
+    fecha: 2022-03-16
+    hora_utc: "18:00"
+    tipo: MONETARY_POLICY
+    severidad: 5
+    titular: "La Fed inicia el ciclo de subas mas rapido en cuarenta anios"
+    descripcion: "Primera suba de un ciclo que lleva la tasa de 0 a mas de 5 por ciento en dieciocho meses."
+    entidades: [FED, DXY, XLK, TLT]
+
+  - id: yen-carry-unwind-2024
+    fecha: 2024-08-05
+    hora_utc: "00:30"
+    tipo: MARKET_STRUCTURE
+    severidad: 4
+    titular: "Desarme abrupto del carry trade en yenes"
+    descripcion: "Suba del BoJ y datos debiles en EE.UU. gatillan liquidacion forzada. El Nikkei cae mas de 12 por ciento."
+    entidades: [JPY, JPN, EWJ, VIX]
+
+  # ------------------------------------------------------------- geopolitica
+  - id: tohoku-fukushima-2011
+    fecha: 2011-03-11
+    hora_utc: "05:46"
+    tipo: DISASTER_HEALTH
+    severidad: 4
+    titular: "Terremoto y tsunami en Tohoku, accidente nuclear en Fukushima"
+    descripcion: "Corta cadenas de suministro globales y saca de servicio la generacion nuclear japonesa."
+    entidades: [JPN, EWJ, uranio, GLD]
+
+  - id: crimea-2014
+    fecha: 2014-03-18
+    hora_utc: "12:00"
+    tipo: GEOPOLITICAL
+    severidad: 3
+    titular: "Rusia formaliza la anexion de Crimea"
+    descripcion: "Primeras sanciones occidentales. Precedente directo del episodio de 2022."
+    entidades: [RUS, UKR, EEM, gas]
+
+  - id: brexit-2016
+    fecha: 2016-06-23
+    hora_utc: "22:00"
+    post_cierre: true
+    tipo: GEOPOLITICAL
+    severidad: 4
+    titular: "El referendum britanico vota por la salida de la Union Europea"
+    descripcion: "Resultado conocido de madrugada. La libra cae mas de 8 por ciento contra el dolar."
+    entidades: [GBR, GBP, EZU, EWG]
+
+  - id: us-election-2016
+    fecha: 2016-11-08
+    hora_utc: "23:30"
+    post_cierre: true
+    tipo: GEOPOLITICAL
+    severidad: 4
+    titular: "Eleccion presidencial en EE.UU. con resultado contrario a las encuestas"
+    descripcion: "Los futuros caen fuerte de madrugada y revierten en la apertura. Rotacion hacia ciclicas y suba de tasas largas."
+    entidades: [USA, SPX, TLT, XLF]
+
+  - id: ukraine-invasion-2022
+    fecha: 2022-02-24
+    hora_utc: "03:00"
+    tipo: GEOPOLITICAL
+    severidad: 5
+    titular: "Rusia invade Ucrania"
+    descripcion: "Shock simultaneo de energia, granos y metales. Sanciones financieras sin precedente."
+    entidades: [RUS, UKR, BNO, GLD, EZU]
+
+  - id: middle-east-2023
+    fecha: 2023-10-07
+    hora_utc: "03:30"
+    tipo: GEOPOLITICAL
+    severidad: 4
+    titular: "Escalada armada en Medio Oriente"
+    descripcion: "Prima de riesgo sobre el crudo y demanda de refugio."
+    entidades: [ISR, BNO, GLD, ITA]
+
+  # ------------------------------------------------------------- commodities
+  - id: opec-no-cut-2014
+    fecha: 2014-11-27
+    hora_utc: "13:00"
+    tipo: COMMODITY_SUPPLY
+    severidad: 4
+    titular: "La OPEP decide no recortar produccion"
+    descripcion: "Arabia Saudita elige defender participacion de mercado. El crudo pierde mas de la mitad de su valor en seis meses."
+    entidades: [OPEP, BNO, XLE, RUS]
+
+  - id: saudi-russia-price-war-2020
+    fecha: 2020-03-09
+    hora_utc: "00:30"
+    tipo: COMMODITY_SUPPLY
+    severidad: 4
+    titular: "Arabia Saudita inicia una guerra de precios tras la ruptura con Rusia"
+    descripcion: "El crudo cae mas de 20 por ciento en la apertura asiatica, sobre el arranque del shock por COVID."
+    entidades: [SAU, RUS, BNO, XLE]
+
+  - id: wti-negative-2020
+    fecha: 2020-04-20
+    hora_utc: "18:30"
+    tipo: COMMODITY_SUPPLY
+    severidad: 4
+    titular: "El contrato de WTI de mayo cierra en terreno negativo"
+    descripcion: "Falta de capacidad de almacenamiento en Cushing en el vencimiento. Primer precio negativo de la historia del crudo."
+    entidades: [WTI, USO, XLE]
+
+  - id: lme-nickel-squeeze-2022
+    fecha: 2022-03-08
+    hora_utc: "08:00"
+    tipo: MARKET_STRUCTURE
+    severidad: 3
+    titular: "El LME suspende la operatoria de niquel y cancela operaciones"
+    descripcion: "El precio se duplica en horas por un short squeeze. La bolsa anula transacciones ya pactadas."
+    entidades: [LME, niquel, metales]
+
+  # -------------------------------------------------- estructura de mercado
+  - id: flash-crash-2010
+    fecha: 2010-05-06
+    hora_utc: "18:45"
+    tipo: MARKET_STRUCTURE
+    severidad: 3
+    titular: "Flash crash: el indice pierde y recupera cerca de 9 por ciento en minutos"
+    descripcion: "Evaporacion de liquidez en el libro de ordenes. Sin causa fundamental."
+    entidades: [SPX, VIX]
+
+  - id: yuan-devaluation-2015
+    fecha: 2015-08-11
+    hora_utc: "01:30"
+    tipo: FX_REGIME
+    severidad: 4
+    titular: "China devalua el yuan de forma sorpresiva"
+    descripcion: "Cambio en el mecanismo de fijacion diaria. Dispara temor a devaluacion competitiva y salida de capitales."
+    entidades: [CHN, CNY, EEM, cobre]
+
+  - id: volmageddon-2018
+    fecha: 2018-02-05
+    hora_utc: "20:00"
+    tipo: MARKET_STRUCTURE
+    severidad: 4
+    titular: "Colapso de los productos cortos de volatilidad"
+    descripcion: "El VIX mas que se duplica en un dia. Los ETP inversos de volatilidad pierden casi todo su valor."
+    entidades: [VIX, SPX, XIV]
+
+  - id: covid-selloff-start-2020
+    fecha: 2020-02-24
+    hora_utc: "13:00"
+    tipo: DISASTER_HEALTH
+    severidad: 5
+    titular: "Arranca el selloff global por la expansion del COVID fuera de China"
+    descripcion: "Los brotes en Italia y Corea convierten un problema regional en uno global."
+    entidades: [SPX, EZU, BNO, TLT]
+
+  - id: pfizer-vaccine-2020
+    fecha: 2020-11-09
+    hora_utc: "11:45"
+    tipo: DISASTER_HEALTH
+    severidad: 4
+    titular: "Pfizer anuncia mas de 90 por ciento de eficacia en su vacuna"
+    descripcion: "Mayor rotacion de un dia entre valor y crecimiento de la que se tenga registro."
+    entidades: [PFE, XLE, XLF, XLK, JETS]
+
+  - id: gamestop-squeeze-2021
+    fecha: 2021-01-27
+    hora_utc: "14:30"
+    tipo: MARKET_STRUCTURE
+    severidad: 2
+    titular: "Squeeze coordinado de posiciones cortas en GameStop"
+    descripcion: "Desapalancamiento forzado de fondos con cortos. Contagio breve al mercado amplio."
+    entidades: [GME, IWM, hedge_funds]

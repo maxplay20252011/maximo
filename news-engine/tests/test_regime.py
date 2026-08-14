@@ -22,6 +22,7 @@ from pit import macro as macro_mod
 from pit import prices as price_mod
 
 THRESHOLDS = regime_mod.load_thresholds("config/thresholds.yaml")
+REGIMES = THRESHOLDS["regimes"]
 
 
 @pytest.fixture()
@@ -73,7 +74,7 @@ def seed_world(
 
 
 def test_los_tramos_son_semiabiertos():
-    vol = THRESHOLDS["vol_regime"]
+    vol = REGIMES["vol_regime"]
     assert regime_mod._bucket(0.00, vol) == "LOW"
     assert regime_mod._bucket(0.24, vol) == "LOW"
     assert regime_mod._bucket(0.25, vol) == "NORMAL"     # el limite inferior entra
@@ -83,7 +84,7 @@ def test_los_tramos_son_semiabiertos():
 
 
 def test_tramos_de_inflacion():
-    infl = THRESHOLDS["inflation_regime"]
+    infl = REGIMES["inflation_regime"]
     assert regime_mod._bucket(0.4, infl) == "DEFLATIONARY"
     assert regime_mod._bucket(2.0, infl) == "ANCHORED"
     assert regime_mod._bucket(2.5, infl) == "ELEVATED"
@@ -302,8 +303,8 @@ def test_el_id_de_regimen_lleva_la_fecha_de_apertura(conn):
 
 
 def test_histeresis_aguanta_el_vaiven_en_el_limite():
-    vol = THRESHOLDS["vol_regime"]
-    margen = THRESHOLDS["hysteresis"]["vol_regime"]   # 0.03
+    vol = REGIMES["vol_regime"]
+    margen = REGIMES["hysteresis"]["vol_regime"]   # 0.03
 
     # Estando en NORMAL [0.25, 0.75): cruzar apenas no alcanza para irse.
     assert regime_mod._bucket_hysteretic(0.76, vol, "NORMAL", margen) == "NORMAL"
@@ -319,7 +320,7 @@ def test_histeresis_aguanta_el_vaiven_en_el_limite():
 
 
 def test_histeresis_no_frena_un_salto_de_verdad():
-    vol = THRESHOLDS["vol_regime"]
+    vol = REGIMES["vol_regime"]
     assert regime_mod._bucket_hysteretic(0.99, vol, "LOW", 0.03) == "CRISIS"
 
 

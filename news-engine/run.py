@@ -23,9 +23,11 @@ app = typer.Typer(add_completion=False, help="Motor de mapeo noticias -> exposic
 db_app = typer.Typer(help="Base de datos: init, migrate, status, backup, reset")
 pit_app = typer.Typer(help="Point-in-time: carga de precios y macro, guardas anti-look-ahead")
 regimes_app = typer.Typer(help="Regimenes de mercado (§4)")
+seed_app = typer.Typer(help="Corpus semilla y outcomes (§6)")
 app.add_typer(db_app, name="db")
 app.add_typer(pit_app, name="pit")
 app.add_typer(regimes_app, name="regimes")
+app.add_typer(seed_app, name="seed")
 
 
 @app.callback()
@@ -446,6 +448,159 @@ def regimes_check(
         if snapshot.hy_oas_pctile is not None:
             table.add_row("hy_oas_pctile", f"{snapshot.hy_oas_pctile:.3f}")
         console.print(table)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# seed (§6)
+# ---------------------------------------------------------------------------
+
+
+@seed_app.command("load")
+def seed_load(
+    ctx: typer.Context,
+    file: str = typer.Option(None, "--file"),
+) -> None:
+    """Carga el corpus semilla con market_state y regimen de cada episodio."""
+    from history import seed as seed_mod
+    from pit import market_state as ms_mod
+
+    universe = ms_mod.load_universe(_universe_path(ctx))
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        resumen = seed_mod.load_corpus(conn, universe, path=file or seed_mod.DEFAULT_SEED_PATH)
+        console.print(
+            f"{resumen['cargados']} episodios ({resumen['desde']} a {resumen['hasta']}) · "
+            f"cobertura media de market_state: {resumen['cobertura_market_state_promedio']:.0%}"
+        )
+        if resumen["sin_regimen"]:
+            console.print(
+                f"[yellow]{len(resumen['sin_regimen'])} sin regimen asignado[/yellow] "
+                "(corre regimes build y despues seed reassign-regimes)"
+            )
+    finally:
+        conn.close()
+
+
+@seed_app.command("reassign-regimes")
+def seed_reassign(ctx: typer.Context) -> None:
+    """Reasigna el regimen de los eventos ya cargados."""
+    from history import seed as seed_mod
+
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        console.print(f"{seed_mod.reassign_regimes(conn)} eventos revisados")
+    finally:
+        conn.close()
+
+
+@seed_app.command("outcomes")
+def seed_outcomes(
+    ctx: typer.Context,
+    all_events: bool = typer.Option(False, "--all"),
+    event_id: str = typer.Option(None, "--event-id"),
+) -> None:
+    """Calcula outcomes a 1, 5 y 20 sesiones contra el benchmark de cada activo."""
+    from history import outcomes as out_mod
+    from pit import market_state as ms_mod
+
+    if not all_events and not event_id:
+        console.print("[red]elegi --all o --event-id[/red]")
+        raise typer.Exit(code=1)
+
+    universe = ms_mod.load_universe(_universe_path(ctx))
+    thresholds = _full_thresholds(ctx)
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        resumen = out_mod.compute_all(
+            conn, universe, thresholds, event_ids=[event_id] if event_id else None
+        )
+        total = sum(sum(c.values()) for c in resumen.values())
+        console.print(f"{len(resumen)} eventos · {total} filas de outcome")
+        table = Table("calidad", "filas")
+        for row in out_mod.quality_summary(conn):
+            table.add_row(row["data_quality"], str(row["n"]))
+        console.print(table)
+    finally:
+        conn.close()
+
+
+def _full_thresholds(ctx: typer.Context) -> dict:
+    from classify import regime as regime_mod
+
+    return regime_mod.load_thresholds(_thresholds_path(ctx))
+
+
+@seed_app.command("autodetect")
+def seed_autodetect(
+    ctx: typer.Context,
+    from_date: str = typer.Option("2010-01-01", "--from"),
+    to_date: str = typer.Option("today", "--to"),
+) -> None:
+    """Detecta fechas con movimientos extremos y las guarda como candidatos (§6.2)."""
+    from history import archive as archive_mod
+
+    thresholds = _full_thresholds(ctx)
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        start = date.fromisoformat(from_date)
+        end = date.today() if to_date == "today" else date.fromisoformat(to_date)
+        candidatos = archive_mod.detect(conn, start, end, thresholds)
+        nuevos = archive_mod.persist_candidates(conn, candidatos)
+        console.print(f"{len(candidatos)} fechas dispararon un umbral · {nuevos} candidatos nuevos")
+        if candidatos:
+            console.print("[yellow]ninguno se archiva como evento hasta que tenga causa: "
+                          "una noticia atribuida o una revision humana (seed review)[/yellow]")
+    finally:
+        conn.close()
+
+
+@seed_app.command("review")
+def seed_review(
+    ctx: typer.Context,
+    limit: int = typer.Option(20, "--limit"),
+) -> None:
+    """Lista candidatos pendientes de revision humana."""
+    from history import archive as archive_mod
+
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        pendientes = archive_mod.pending(conn, limit)
+        if not pendientes:
+            console.print("[green]sin candidatos pendientes[/green]")
+            return
+        table = Table("fecha", "umbrales", "metricas")
+        for row in pendientes:
+            table.add_row(row["trigger_date"], row["triggers_json"], row["metrics_json"])
+        console.print(table)
+        stats = archive_mod.candidate_stats(conn)
+        console.print(f"total {stats['total']} · revisados {stats['revisados'] or 0} · promovidos {stats['promovidos'] or 0}")
+    finally:
+        conn.close()
+
+
+@seed_app.command("stats")
+def seed_stats(ctx: typer.Context) -> None:
+    """Cuantos episodios hay, de que tipo, en que regimen y cuales sin outcomes."""
+    from history import seed as seed_mod
+
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        datos = seed_mod.stats(conn)
+        table = Table("tipo", "n", "severidad media")
+        for row in datos["por_tipo"]:
+            table.add_row(row["event_type"], str(row["n"]), str(row["sev"]))
+        console.print(table)
+
+        table = Table("regimen", "n")
+        for row in datos["por_regimen"]:
+            table.add_row(row["regimen"], str(row["n"]))
+        console.print(table)
+
+        faltantes = datos["sin_outcomes"]
+        if faltantes:
+            console.print(f"[yellow]{len(faltantes)} eventos sin outcomes calculados[/yellow]")
     finally:
         conn.close()
 
