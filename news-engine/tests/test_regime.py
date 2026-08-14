@@ -294,3 +294,71 @@ def test_el_id_de_regimen_lleva_la_fecha_de_apertura(conn):
     regime_mod.build_regimes(conn, date(2021, 1, 1), date(2022, 12, 31), THRESHOLDS)
     for row in regime_mod.timeline(conn):
         assert row["regime_id"] == f"{row['regime_label']}@{row['start_date']}"
+
+
+# ---------------------------------------------------------------------------
+# Estabilidad: histeresis y duracion minima
+# ---------------------------------------------------------------------------
+
+
+def test_histeresis_aguanta_el_vaiven_en_el_limite():
+    vol = THRESHOLDS["vol_regime"]
+    margen = THRESHOLDS["hysteresis"]["vol_regime"]   # 0.03
+
+    # Estando en NORMAL [0.25, 0.75): cruzar apenas no alcanza para irse.
+    assert regime_mod._bucket_hysteretic(0.76, vol, "NORMAL", margen) == "NORMAL"
+    assert regime_mod._bucket_hysteretic(0.77, vol, "NORMAL", margen) == "NORMAL"
+    assert regime_mod._bucket_hysteretic(0.79, vol, "NORMAL", margen) == "STRESSED"
+
+    # Y al reves: estando en STRESSED, volver apenas tampoco alcanza.
+    assert regime_mod._bucket_hysteretic(0.74, vol, "STRESSED", margen) == "STRESSED"
+    assert regime_mod._bucket_hysteretic(0.71, vol, "STRESSED", margen) == "NORMAL"
+
+    # Sin regimen vigente no hay de que salir: se aplica el tramo pelado.
+    assert regime_mod._bucket_hysteretic(0.76, vol, None, margen) == "STRESSED"
+
+
+def test_histeresis_no_frena_un_salto_de_verdad():
+    vol = THRESHOLDS["vol_regime"]
+    assert regime_mod._bucket_hysteretic(0.99, vol, "LOW", 0.03) == "CRISIS"
+
+
+def test_una_excursion_corta_no_abre_episodio(conn):
+    """Dos semanas de VIX alto no son un regimen nuevo."""
+    seed_world(
+        conn, date(2018, 1, 1), date(2021, 6, 30),
+        vix=lambda d: 60.0 if date(2021, 3, 1) <= d <= date(2021, 3, 14) else 15.0 + d.weekday(),
+    )
+    report = regime_mod.build_regimes(conn, date(2021, 1, 6), date(2021, 6, 30), THRESHOLDS)
+
+    episodios = regime_mod.timeline(conn)
+    assert len(episodios) == 1
+    assert report.cambios_descartados >= 1
+    assert episodios[0]["vol_regime"] == "NORMAL"
+
+
+def test_un_cambio_sostenido_si_abre_episodio_y_arranca_cuando_aparecio(conn):
+    seed_world(
+        conn, date(2018, 1, 1), date(2021, 6, 30),
+        vix=lambda d: 60.0 if d >= date(2021, 3, 1) else 15.0 + d.weekday(),
+    )
+    regime_mod.build_regimes(conn, date(2021, 1, 6), date(2021, 6, 30), THRESHOLDS)
+
+    episodios = regime_mod.timeline(conn)
+    assert len(episodios) == 2
+    assert episodios[0]["vol_regime"] == "NORMAL"
+    assert episodios[1]["vol_regime"] == "CRISIS"
+    # El episodio arranca el primer paso en que aparecio el cambio (2021-03-03),
+    # no cuatro semanas despues cuando se confirmo.
+    assert episodios[1]["start_date"] == "2021-03-03"
+    assert episodios[0]["end_date"] == "2021-03-02"
+
+
+def test_incremental_no_duplica_episodios(conn):
+    seed_world(conn, date(2018, 1, 1), date(2021, 6, 30))
+    regime_mod.build_regimes(conn, date(2021, 1, 6), date(2021, 3, 31), THRESHOLDS)
+    antes = len(regime_mod.timeline(conn))
+
+    abierto = regime_mod.current_regime(conn)
+    regime_mod.build_regimes(conn, date.fromisoformat(abierto["start_date"]), date(2021, 6, 30), THRESHOLDS)
+    assert len(regime_mod.timeline(conn)) == antes

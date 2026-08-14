@@ -330,3 +330,112 @@ def test_clock_rechaza_timestamps_naive():
     with pytest.raises(ValueError):
         format_utc(datetime(2022, 2, 24, 5, 0))
     assert format_utc(datetime(2022, 2, 24, 5, 0, tzinfo=timezone.utc)) == TS
+
+
+# --------------------------------------------------------------------------
+# Dominios cerrados (migracion 003)
+# --------------------------------------------------------------------------
+
+
+def test_la_taxonomia_de_python_y_el_check_de_sql_coinciden(conn):
+    from classify.event_types import EVENT_TYPE_NAMES
+
+    ddl = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='events_archive'"
+    ).fetchone()["sql"]
+    en_sql = {t for t in EVENT_TYPE_NAMES if f"'{t}'" in ddl}
+    assert en_sql == set(EVENT_TYPE_NAMES)
+    assert len(EVENT_TYPE_NAMES) == 11
+
+
+def test_clase_de_evento_inventada_rechazada(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """INSERT INTO events_archive (event_id, occurred_at_utc, ingested_at_utc, event_type,
+                                           headline, market_state_json)
+               VALUES ('x', ?, ?, 'NOTICIA_LINDA', 'test', '{}')""",
+            (TS, TS),
+        )
+
+
+def test_dominios_de_texto_acotados(conn):
+    insert_event(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE events_archive SET surprise_direction='ARRIBA' WHERE event_id='ukraine-2022'")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE events_archive SET source_tier='TIER9' WHERE event_id='ukraine-2022'")
+    conn.execute("UPDATE events_archive SET surprise_direction='ABOVE', source_tier='TIER1' WHERE event_id='ukraine-2022'")
+
+    insert_call(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE calls SET narrative_alignment='MAS O MENOS' WHERE call_id='c1'")
+    conn.execute("UPDATE calls SET narrative_alignment='CONTRADICTS' WHERE call_id='c1'")
+
+    conn.execute("INSERT INTO outcomes (event_id, asset, data_quality) VALUES ('ukraine-2022', 'SPY', 'OK')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE outcomes SET data_quality='MASOMENOS' WHERE asset='SPY'")
+
+
+def test_no_consensus_no_puede_traer_un_valor_de_consenso(conn):
+    insert_event(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """UPDATE events_archive SET surprise_direction='NO_CONSENSUS', consensus_value=3.1
+               WHERE event_id='ukraine-2022'"""
+        )
+
+
+def test_exceso_sin_benchmark_rechazado(conn):
+    insert_event(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO outcomes (event_id, asset, excess_5d) VALUES ('ukraine-2022', 'XLE', 0.03)")
+    conn.execute(
+        "INSERT INTO outcomes (event_id, asset, benchmark, excess_5d) VALUES ('ukraine-2022', 'XLE', 'SPY', 0.03)"
+    )
+
+
+def test_un_call_por_evento_activo_y_horizonte(conn):
+    insert_event(conn)
+    insert_call(conn, call_id="c1")
+    with pytest.raises(sqlite3.IntegrityError):
+        insert_call(conn, call_id="c2")                    # mismo evento/activo/horizonte
+    insert_call(conn, call_id="c3", horizon="20d")         # otro horizonte: entra
+    insert_call(conn, call_id="c4", asset="XLE")           # otro activo: entra
+
+
+def test_la_migracion_003_conserva_las_filas(tmp_path):
+    """Reconstruir tablas con hijos que las referencian no puede perder datos."""
+    migraciones = dbmod.discover_migrations()
+    conn = dbmod.connect(tmp_path / "vieja.db")
+    try:
+        dbmod.migrate(conn, [m for m in migraciones if m.version <= 2])
+        assert dbmod.schema_version(conn) == 2
+
+        insert_event(conn)
+        insert_call(conn, call_id="c1")
+        conn.execute(
+            "INSERT INTO outcomes (event_id, asset, benchmark, ret_5d) VALUES ('ukraine-2022', 'BNO', 'SPY', 0.08)"
+        )
+        conn.execute(
+            "INSERT INTO call_results (call_id, realized_return, hit) VALUES ('c1', 0.05, 1)"
+        )
+        conn.execute(
+            "INSERT INTO raw_news (news_id, fetched_at_utc, title, event_id) VALUES ('n1', ?, 't', 'ukraine-2022')",
+            (TS,),
+        )
+
+        dbmod.migrate(conn)
+        assert dbmod.schema_version(conn) == len(migraciones)
+
+        assert conn.execute("SELECT COUNT(*) AS n FROM events_archive").fetchone()["n"] == 1
+        assert conn.execute("SELECT COUNT(*) AS n FROM outcomes").fetchone()["n"] == 1
+        assert conn.execute("SELECT COUNT(*) AS n FROM calls").fetchone()["n"] == 1
+        assert conn.execute("SELECT COUNT(*) AS n FROM call_results").fetchone()["n"] == 1
+        assert conn.execute("SELECT event_id FROM raw_news WHERE news_id='n1'").fetchone()[0] == "ukraine-2022"
+        assert dbmod.integrity_check(conn) == []
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+        # Y los indices se recrearon.
+        assert {"idx_ev_type_date", "idx_calls_eval", "idx_outcomes_asset"} <= set(dbmod.index_names(conn))
+    finally:
+        conn.close()

@@ -362,14 +362,17 @@ def regimes_build(
         if incremental:
             abierto = regime_mod.current_regime(conn)
             if abierto:
-                start = date.fromisoformat(abierto["start_date"]) + timedelta(days=thresholds["step_days"])
+                # Desde el inicio del episodio abierto: la ventana de confirmacion
+                # no se persiste y hay que reconstruirla recorriendo de nuevo.
+                start = date.fromisoformat(abierto["start_date"])
         end = date.today() if to_date == "today" else date.fromisoformat(to_date)
 
         report = regime_mod.build_regimes(conn, start, end, thresholds)
         console.print(
             f"{report.fechas_evaluadas} fechas evaluadas · "
             f"{report.episodios_creados} episodios · "
-            f"{report.fechas_sin_clasificar} sin clasificar"
+            f"{report.fechas_sin_clasificar} sin clasificar · "
+            f"{report.cambios_descartados} cambios descartados por duracion minima"
         )
         if report.faltantes_por_dimension:
             for dim, count in sorted(report.faltantes_por_dimension.items(), key=lambda x: -x[1]):

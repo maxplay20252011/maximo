@@ -23,6 +23,10 @@ DEFAULT_DB_PATH = Path("data/news.db")
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 MIGRATION_FILENAME_RE = re.compile(r"^(\d{3})_([a-z0-9_]+)\.sql$")
 
+# Directiva opcional en las primeras lineas de una migracion que reconstruye
+# tablas referenciadas por otras.
+FK_OFF_DIRECTIVE = "-- pragma: foreign_keys=off"
+
 # Las 8 tablas de dominio de §3. `schema_migrations` es infraestructura del runner.
 DOMAIN_TABLES = (
     "events_archive",
@@ -197,10 +201,22 @@ def migrate(conn: sqlite3.Connection, migrations: list[Migration] | None = None)
     applied_now: list[Migration] = []
     for migration in pending:
         statements = _split_statements(migration.sql)
+        # Reconstruir una tabla con hijos que la referencian exige apagar las FK
+        # (procedimiento documentado de SQLite). El PRAGMA no funciona adentro de
+        # una transaccion, por eso la directiva va en el archivo y se maneja aca.
+        fk_off = FK_OFF_DIRECTIVE in "\n".join(migration.sql.splitlines()[:5])
+        if fk_off:
+            conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("BEGIN")
         try:
             for statement in statements:
                 conn.execute(statement)
+            if fk_off:
+                huerfanas = conn.execute("PRAGMA foreign_key_check").fetchall()
+                if huerfanas:
+                    raise MigrationError(
+                        f"{migration.label} dejo {len(huerfanas)} filas huerfanas: {huerfanas[:3]}"
+                    )
             conn.execute(
                 "INSERT INTO schema_migrations (version, name, checksum, applied_at_utc) VALUES (?, ?, ?, ?)",
                 (migration.version, migration.name, migration.checksum, format_utc(now())),
@@ -209,6 +225,9 @@ def migrate(conn: sqlite3.Connection, migrations: list[Migration] | None = None)
         except Exception:
             conn.execute("ROLLBACK")
             raise
+        finally:
+            if fk_off:
+                conn.execute("PRAGMA foreign_keys = ON")
         applied_now.append(migration)
     return applied_now
 

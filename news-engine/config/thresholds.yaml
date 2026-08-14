@@ -14,6 +14,29 @@ regimes:
   # Paso de recalculo (§4: semanal).
   step_days: 7
 
+  # --- Estabilidad de la linea de tiempo -----------------------------------
+  # §4 clasifica cada fecha de forma independiente. Con umbrales duros, un valor
+  # que oscila alrededor de un limite (percentil 0.749 -> 0.751 -> 0.748) genera
+  # un episodio nuevo por semana. Eso fragmenta el archivo y hunde la cantidad de
+  # analogos con regime_match_exact del matcher (§7.1).
+  #
+  # Dos frenos, complementarios:
+  #
+  # 1. Histeresis: para ABANDONAR el tramo vigente hay que cruzar su limite por
+  #    este margen. Entrar no pide margen. Actua sobre el valor.
+  hysteresis:
+    vol_regime:       0.03    # percentil
+    credit_regime:    0.03    # percentil
+    inflation_regime: 0.20    # puntos porcentuales de YoY
+    usd_trend:        0.005   # retorno a 60 dias
+    rate_regime:      0.05    # puntos porcentuales de tasa
+  #
+  # 2. Duracion minima: un cambio de etiqueta tiene que sostenerse esta cantidad
+  #    de pasos consecutivos antes de abrir un episodio. Si vuelve antes, no
+  #    existio. El episodio arranca la fecha en que el cambio aparecio, no la
+  #    fecha en que se confirmo. Actua sobre la etiqueta.
+  min_episode_steps: 4        # 4 pasos semanales = 28 dias
+
   vol_regime:            # percentil de VIX, ventana movil 5 anios
     serie: VIX
     LOW:      [0.00, 0.25]

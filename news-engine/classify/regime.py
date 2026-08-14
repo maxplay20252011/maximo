@@ -80,17 +80,25 @@ def classify_at(
     conn: sqlite3.Connection,
     when: date,
     thresholds: dict[str, Any],
+    previous: dict[str, str | None] | None = None,
 ) -> RegimeSnapshot:
-    """Clasifica `when` usando solo datos publicos a esa fecha."""
+    """Clasifica `when` usando solo datos publicos a esa fecha.
+
+    `previous` son las etiquetas vigentes en el paso anterior. Con eso se aplica
+    la histeresis: para abandonar un tramo hay que cruzar su limite por el margen
+    de config. Sin `previous` no hay histeresis, que es lo correcto para una
+    clasificacion suelta: no hay tramo vigente del que salir.
+    """
     moment = datetime.combine(when, time(23, 59, 59), tzinfo=timezone.utc)
     inputs: dict[str, float | None] = {}
+    anterior = previous or {}
 
     with as_of_ctx(moment):
-        vol_label, vix_pctile, vix_level = _vol_regime(conn, when, moment, thresholds)
-        credit_label, oas_pctile, oas_level = _credit_regime(conn, when, moment, thresholds)
-        rate_label, policy_rate, rate_change = _rate_regime(conn, moment, thresholds)
-        infl_label, core_yoy = _inflation_regime(conn, moment, thresholds)
-        usd_label, dxy_return = _usd_trend(conn, when, moment, thresholds)
+        vol_label, vix_pctile, vix_level = _vol_regime(conn, when, moment, thresholds, anterior.get("vol_regime"))
+        credit_label, oas_pctile, oas_level = _credit_regime(conn, when, moment, thresholds, anterior.get("credit_regime"))
+        rate_label, policy_rate, rate_change = _rate_regime(conn, moment, thresholds, anterior.get("rate_regime"))
+        infl_label, core_yoy = _inflation_regime(conn, moment, thresholds, anterior.get("inflation_regime"))
+        usd_label, dxy_return = _usd_trend(conn, when, moment, thresholds, anterior.get("usd_trend"))
 
     inputs.update(
         {
@@ -118,18 +126,23 @@ def classify_at(
     return replace(snapshot, missing=faltantes)
 
 
+def _margin(thresholds: dict[str, Any], dimension: str) -> float:
+    return float(thresholds.get("hysteresis", {}).get(dimension, 0.0))
+
+
 def _vol_regime(
-    conn: sqlite3.Connection, when: date, moment: datetime, thresholds: dict[str, Any]
+    conn: sqlite3.Connection, when: date, moment: datetime, thresholds: dict[str, Any], previous: str | None
 ) -> tuple[str | None, float | None, float | None]:
     config = thresholds["vol_regime"]
     pctile, level = _price_percentile(conn, config["serie"], when, moment, thresholds)
     if pctile is None:
         return None, None, level
-    return _bucket(pctile, config), round(pctile, 4), level
+    label = _bucket_hysteretic(pctile, config, previous, _margin(thresholds, "vol_regime"))
+    return label, round(pctile, 4), level
 
 
 def _credit_regime(
-    conn: sqlite3.Connection, when: date, moment: datetime, thresholds: dict[str, Any]
+    conn: sqlite3.Connection, when: date, moment: datetime, thresholds: dict[str, Any], previous: str | None
 ) -> tuple[str | None, float | None, float | None]:
     config = thresholds["credit_regime"]
     window_start = when - timedelta(days=thresholds["percentile_window_days"])
@@ -139,11 +152,12 @@ def _credit_regime(
 
     level = serie[-1][1]
     pctile = _percentile_of(level, [value for _, value in serie])
-    return _bucket(pctile, config), round(pctile, 4), level
+    label = _bucket_hysteretic(pctile, config, previous, _margin(thresholds, "credit_regime"))
+    return label, round(pctile, 4), level
 
 
 def _rate_regime(
-    conn: sqlite3.Connection, moment: datetime, thresholds: dict[str, Any]
+    conn: sqlite3.Connection, moment: datetime, thresholds: dict[str, Any], previous: str | None
 ) -> tuple[str | None, float | None, float | None]:
     config = thresholds["rate_regime"]
     latest = macro_mod.get_latest_macro_as_known_at(conn, config["serie"], moment, max_staleness_days=60)
@@ -155,28 +169,42 @@ def _rate_regime(
     if change is None:
         return None, policy_rate, None
 
-    # Orden de §4: ZIRP primero.
-    if policy_rate <= config["ZIRP"]["policy_rate_max"]:
+    margen = _margin(thresholds, "rate_regime")
+    techo_zirp = config["ZIRP"]["policy_rate_max"]
+    piso_hiking = config["HIKING"]["change_6m_min"]
+    techo_cutting = config["CUTTING"]["change_6m_max"]
+
+    # Histeresis: quedarse en el tramo vigente mientras no se cruce con margen.
+    if previous == "ZIRP" and policy_rate <= techo_zirp + margen:
         return "ZIRP", policy_rate, round(change, 4)
-    if change >= config["HIKING"]["change_6m_min"]:
+    if previous == "HIKING" and change >= piso_hiking - margen and policy_rate > techo_zirp:
         return "HIKING", policy_rate, round(change, 4)
-    if change <= config["CUTTING"]["change_6m_max"]:
+    if previous == "CUTTING" and change <= techo_cutting + margen and policy_rate > techo_zirp:
+        return "CUTTING", policy_rate, round(change, 4)
+
+    # Orden de §4: ZIRP primero.
+    if policy_rate <= techo_zirp:
+        return "ZIRP", policy_rate, round(change, 4)
+    if change >= piso_hiking:
+        return "HIKING", policy_rate, round(change, 4)
+    if change <= techo_cutting:
         return "CUTTING", policy_rate, round(change, 4)
     return "HIGH_STABLE", policy_rate, round(change, 4)
 
 
 def _inflation_regime(
-    conn: sqlite3.Connection, moment: datetime, thresholds: dict[str, Any]
+    conn: sqlite3.Connection, moment: datetime, thresholds: dict[str, Any], previous: str | None
 ) -> tuple[str | None, float | None]:
     config = thresholds["inflation_regime"]
     yoy = _yoy_as_known_at(conn, config["serie"], moment)
     if yoy is None:
         return None, None
-    return _bucket(yoy, config), round(yoy, 4)
+    label = _bucket_hysteretic(yoy, config, previous, _margin(thresholds, "inflation_regime"))
+    return label, round(yoy, 4)
 
 
 def _usd_trend(
-    conn: sqlite3.Connection, when: date, moment: datetime, thresholds: dict[str, Any]
+    conn: sqlite3.Connection, when: date, moment: datetime, thresholds: dict[str, Any], previous: str | None
 ) -> tuple[str | None, float | None]:
     config = thresholds["usd_trend"]
     sesiones = config["sesiones"]
@@ -188,9 +216,20 @@ def _usd_trend(
     except price_mod.PriceDataError:
         return None, None
 
-    if retorno >= config["STRONG"]["min"]:
+    margen = _margin(thresholds, "usd_trend")
+    piso_strong = config["STRONG"]["min"]
+    techo_weak = config["WEAK"]["max"]
+
+    if previous == "STRONG" and retorno >= piso_strong - margen:
         return "STRONG", round(retorno, 4)
-    if retorno <= config["WEAK"]["max"]:
+    if previous == "WEAK" and retorno <= techo_weak + margen:
+        return "WEAK", round(retorno, 4)
+    if previous == "NEUTRAL" and techo_weak - margen < retorno < piso_strong + margen:
+        return "NEUTRAL", round(retorno, 4)
+
+    if retorno >= piso_strong:
+        return "STRONG", round(retorno, 4)
+    if retorno <= techo_weak:
         return "WEAK", round(retorno, 4)
     return "NEUTRAL", round(retorno, 4)
 
@@ -205,11 +244,30 @@ class BuildReport:
     episodios_creados: int = 0
     fechas_evaluadas: int = 0
     fechas_sin_clasificar: int = 0
+    cambios_descartados: int = 0
     faltantes_por_dimension: dict[str, int] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.faltantes_por_dimension is None:
             self.faltantes_por_dimension = {}
+
+
+@dataclass
+class _Pending:
+    """Cambio de etiqueta esperando confirmacion."""
+
+    label: str
+    first_seen: date
+    snapshot: RegimeSnapshot
+    steps: int = 1
+
+
+def _labels_of(snapshot: RegimeSnapshot) -> dict[str, str | None]:
+    return {dim: getattr(snapshot, dim) for dim in DIMENSIONS}
+
+
+def _labels_of_row(row: sqlite3.Row) -> dict[str, str | None]:
+    return {dim: row[dim] for dim in DIMENSIONS}
 
 
 def build_regimes(
@@ -220,23 +278,31 @@ def build_regimes(
 ) -> BuildReport:
     """Recorre el periodo con el paso de §4 y arma los episodios.
 
-    Al cambiar cualquier dimension se cierra el episodio anterior (end_date = el
-    dia anterior) y se abre uno nuevo. Reanudable: parte del ultimo episodio
-    abierto que haya en la base.
+    Un cambio de etiqueta no abre un episodio en el acto: tiene que sostenerse
+    `min_episode_steps` pasos consecutivos. Si vuelve antes, no existio. Cuando
+    se confirma, el episodio arranca la fecha en que el cambio aparecio, no la
+    fecha en que se confirmo -- si no, la linea de tiempo quedaria corrida un mes.
+
+    Reanudable: parte del ultimo episodio abierto que haya en la base. La ventana
+    de confirmacion no se persiste, asi que un `--incremental` debe re-recorrer
+    desde el inicio del episodio abierto, que es lo que hace el CLI.
     """
     report = BuildReport()
     step = timedelta(days=thresholds["step_days"])
+    min_steps = int(thresholds.get("min_episode_steps", 1))
 
-    abierto = conn.execute(
-        "SELECT regime_id, regime_label, start_date FROM regimes WHERE end_date IS NULL"
-    ).fetchone()
+    abierto = conn.execute("SELECT * FROM regimes WHERE end_date IS NULL").fetchone()
     label_actual = abierto["regime_label"] if abierto else None
     id_actual = abierto["regime_id"] if abierto else None
+    # Ancla de la histeresis: el regimen vigente. Para salir de el hay que cruzar
+    # con margen; un vaiven de un paso no alcanza.
+    anclaje = _labels_of_row(abierto) if abierto else None
+    pendiente: _Pending | None = None
 
     when = start
     while when <= end:
         report.fechas_evaluadas += 1
-        snapshot = classify_at(conn, when, thresholds)
+        snapshot = classify_at(conn, when, thresholds, previous=anclaje)
 
         if not snapshot.complete:
             report.fechas_sin_clasificar += 1
@@ -245,17 +311,39 @@ def build_regimes(
             when += step
             continue
 
-        if snapshot.label != label_actual:
-            if id_actual is not None:
-                conn.execute(
-                    "UPDATE regimes SET end_date = ? WHERE regime_id = ?",
-                    ((when - timedelta(days=1)).isoformat(), id_actual),
-                )
+        if label_actual is None:
+            # Primer episodio: no hay nada de lo que dudar.
             id_actual = _insert_regime(conn, snapshot, when)
             label_actual = snapshot.label
+            anclaje = _labels_of(snapshot)
             report.episodios_creados += 1
+        elif snapshot.label == label_actual:
+            if pendiente is not None:
+                report.cambios_descartados += 1
+            pendiente = None
+        else:
+            if pendiente is not None and pendiente.label == snapshot.label:
+                pendiente.steps += 1
+            else:
+                if pendiente is not None:
+                    report.cambios_descartados += 1
+                pendiente = _Pending(label=snapshot.label, first_seen=when, snapshot=snapshot)
+
+            if pendiente.steps >= min_steps:
+                conn.execute(
+                    "UPDATE regimes SET end_date = ? WHERE regime_id = ?",
+                    ((pendiente.first_seen - timedelta(days=1)).isoformat(), id_actual),
+                )
+                id_actual = _insert_regime(conn, pendiente.snapshot, pendiente.first_seen)
+                label_actual = pendiente.label
+                anclaje = _labels_of(pendiente.snapshot)
+                pendiente = None
+                report.episodios_creados += 1
 
         when += step
+
+    if pendiente is not None:
+        report.cambios_descartados += 1
 
     return report
 
@@ -329,6 +417,27 @@ def _bucket(value: float, config: dict[str, Any]) -> str | None:
         if lo <= value < hi or (ultimo and value == hi):
             return label
     return None
+
+
+def _bucket_hysteretic(
+    value: float, config: dict[str, Any], previous: str | None, margin: float
+) -> str | None:
+    """Como `_bucket`, pero para salir del tramo vigente hay que cruzar su limite
+    por `margin`. Entrar no pide margen: la histeresis frena el vaiven, no la
+    entrada a un regimen nuevo.
+    """
+    candidato = _bucket(value, config)
+    if previous is None or margin <= 0 or candidato == previous:
+        return candidato
+
+    tramo = config.get(previous)
+    if not isinstance(tramo, list) or len(tramo) != 2:
+        return candidato   # el tramo anterior ya no existe en la config
+
+    lo, hi = tramo
+    if lo - margin <= value < hi + margin:
+        return previous
+    return candidato
 
 
 def _percentile_of(value: float, sample: list[float]) -> float:
