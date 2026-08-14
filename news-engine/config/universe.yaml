@@ -1,0 +1,82 @@
+# Universo de activos y mapeo a simbolos de la fuente.
+#
+# §2.1(c) — sesgo de supervivencia: el universo se restringe a ETFs de sector e
+# indices liquidos. No hay single names historicos. Un ETF que dejo de existir
+# tampoco esta, asi que el sesgo se reduce pero no es cero: se declara en el
+# header del reporte (§11).
+#
+# Los simbolos son los de stooq (sufijo .us para acciones y ETFs de EE.UU.,
+# ^ para indices). Estan sin verificar contra la fuente: este entorno no tiene
+# salida a stooq. Verificar con `python run.py pit load-prices --dry-run`.
+
+benchmarks:            # §6.3
+  equity_us:     SPY
+  equity_europa: EZU
+  equity_japon:  EWJ
+  equity_em:     EEM
+  credito_hy:    HYG
+  credito_ig:    LQD
+  soberano_us:   IEF
+
+# Activos con benchmark asignado. `null` = retorno absoluto (FX y commodities, §6.3).
+assets:
+  SPY:    {clase: equity_us,   benchmark: null,      simbolo: spy.us}
+  QQQ:    {clase: equity_us,   benchmark: SPY,       simbolo: qqq.us}
+  IWM:    {clase: equity_us,   benchmark: SPY,       simbolo: iwm.us}
+  XLE:    {clase: sector_us,   benchmark: SPY,       simbolo: xle.us}
+  XLF:    {clase: sector_us,   benchmark: SPY,       simbolo: xlf.us}
+  XLK:    {clase: sector_us,   benchmark: SPY,       simbolo: xlk.us}
+  XLI:    {clase: sector_us,   benchmark: SPY,       simbolo: xli.us}
+  XLU:    {clase: sector_us,   benchmark: SPY,       simbolo: xlu.us}
+  XLV:    {clase: sector_us,   benchmark: SPY,       simbolo: xlv.us}
+  XLP:    {clase: sector_us,   benchmark: SPY,       simbolo: xlp.us}
+  KRE:    {clase: sector_us,   benchmark: SPY,       simbolo: kre.us}
+  ITA:    {clase: sector_us,   benchmark: SPY,       simbolo: ita.us}
+  JETS:   {clase: sector_us,   benchmark: SPY,       simbolo: jets.us}
+  OIH:    {clase: sector_us,   benchmark: SPY,       simbolo: oih.us}
+  EEM:    {clase: equity_em,   benchmark: null,      simbolo: eem.us}
+  EZU:    {clase: equity_eu,   benchmark: null,      simbolo: ezu.us}
+  EWJ:    {clase: equity_jp,   benchmark: null,      simbolo: ewj.us}
+  EWG:    {clase: equity_eu,   benchmark: EZU,       simbolo: ewg.us}
+  EWY:    {clase: equity_em,   benchmark: EEM,       simbolo: ewy.us}
+  TLT:    {clase: soberano,    benchmark: null,      simbolo: tlt.us}
+  IEF:    {clase: soberano,    benchmark: null,      simbolo: ief.us}
+  SHY:    {clase: soberano,    benchmark: null,      simbolo: shy.us}
+  TIP:    {clase: soberano,    benchmark: IEF,       simbolo: tip.us}
+  HYG:    {clase: credito,     benchmark: IEF,       simbolo: hyg.us}
+  LQD:    {clase: credito,     benchmark: IEF,       simbolo: lqd.us}
+  GLD:    {clase: commodity,   benchmark: null,      simbolo: gld.us}
+  BNO:    {clase: commodity,   benchmark: null,      simbolo: bno.us}
+  USO:    {clase: commodity,   benchmark: null,      simbolo: uso.us}
+
+# Series e instrumentos que arman el market_state de §7.2.
+# kind: price   -> ultimo cierre visible del activo
+#       macro   -> ultima observacion publicada (vintage ALFRED)
+#       unavailable -> sin fuente free confiable; queda null y se declara
+market_state:
+  vix:          {kind: price, asset: VIX,   simbolo: "^vix"}
+  spx_level:    {kind: price, asset: SPX,   simbolo: "^spx"}
+  dxy:          {kind: price, asset: DXY,   simbolo: "dx.f"}
+  gold:         {kind: price, asset: GOLD,  simbolo: "xauusd"}
+  brent:        {kind: price, asset: BRENT, simbolo: "cb.f"}
+  us10y:        {kind: macro, series: DGS10, max_staleness_days: 7}
+  us2y:         {kind: macro, series: DGS2,  max_staleness_days: 7}
+  hy_oas:       {kind: macro, series: BAMLH0A0HYM2, max_staleness_days: 7}
+  put_call_ratio:
+    kind: unavailable
+    nota: "CBOE no publica historico free estable. Queda null hasta tener fuente."
+  breadth_pct_above_200dma:
+    kind: unavailable
+    nota: "Exige constituyentes historicos del indice; es justo el dato que §2.1(c) dice no tener."
+
+# Series macro a cargar con vintages (§C.2 pit load-macro).
+macro_series:
+  - CPIAUCSL
+  - CPILFESL
+  - UNRATE
+  - PAYEMS
+  - DGS10
+  - DGS2
+  - DFF
+  - BAMLH0A0HYM2
+  - GDPC1

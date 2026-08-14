@@ -96,7 +96,7 @@ def test_indices_del_spec_presentes(conn):
 
 
 def test_version_de_schema_y_migracion_idempotente(conn):
-    assert dbmod.schema_version(conn) == 1
+    assert dbmod.schema_version(conn) == len(dbmod.discover_migrations())
     assert dbmod.migrate(conn) == []
     assert dbmod.pending_migrations(conn) == []
 
@@ -298,7 +298,7 @@ def test_backup_es_legible_y_completo(tmp_path):
     copy = dbmod.connect(dest)
     try:
         assert copy.execute("SELECT COUNT(*) AS n FROM events_archive").fetchone()["n"] == 1
-        assert dbmod.schema_version(copy) == 1
+        assert dbmod.schema_version(copy) == len(dbmod.discover_migrations())
     finally:
         copy.close()
 
@@ -316,7 +316,7 @@ def test_reset_exige_confirmacion(tmp_path):
     conn = dbmod.connect(db_path)
     try:
         assert conn.execute("SELECT COUNT(*) AS n FROM events_archive").fetchone()["n"] == 0
-        assert dbmod.schema_version(conn) == 1
+        assert dbmod.schema_version(conn) == len(dbmod.discover_migrations())
     finally:
         conn.close()
 
