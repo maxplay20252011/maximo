@@ -22,8 +22,10 @@ console = Console()
 app = typer.Typer(add_completion=False, help="Motor de mapeo noticias -> exposicion de activos")
 db_app = typer.Typer(help="Base de datos: init, migrate, status, backup, reset")
 pit_app = typer.Typer(help="Point-in-time: carga de precios y macro, guardas anti-look-ahead")
+regimes_app = typer.Typer(help="Regimenes de mercado (§4)")
 app.add_typer(db_app, name="db")
 app.add_typer(pit_app, name="pit")
+app.add_typer(regimes_app, name="regimes")
 
 
 @app.callback()
@@ -325,6 +327,122 @@ def pit_coverage(ctx: typer.Context) -> None:
                 str(row["vintages"]), row["desde"], row["hasta"],
             )
         console.print(table if macro else "[yellow]sin series macro cargadas[/yellow]")
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# regimes (§4)
+# ---------------------------------------------------------------------------
+
+
+def _thresholds_path(ctx: typer.Context) -> str:
+    return str(Path((ctx.obj or {}).get("config", "config")) / "thresholds.yaml")
+
+
+@regimes_app.command("build")
+def regimes_build(
+    ctx: typer.Context,
+    from_date: str = typer.Option("2007-01-01", "--from"),
+    to_date: str = typer.Option("today", "--to"),
+    incremental: bool = typer.Option(False, "--incremental", help="Desde el ultimo episodio abierto"),
+    rebuild: bool = typer.Option(False, "--rebuild", help="Borra la linea de tiempo y la rehace"),
+) -> None:
+    """Arma la linea de tiempo de regimenes, paso semanal (§4)."""
+    from classify import regime as regime_mod
+
+    thresholds = regime_mod.load_thresholds(_thresholds_path(ctx))
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        if rebuild:
+            borrados = regime_mod.clear_regimes(conn)
+            console.print(f"[yellow]borrados {borrados} episodios[/yellow]")
+
+        start = date.fromisoformat(from_date)
+        if incremental:
+            abierto = regime_mod.current_regime(conn)
+            if abierto:
+                start = date.fromisoformat(abierto["start_date"]) + timedelta(days=thresholds["step_days"])
+        end = date.today() if to_date == "today" else date.fromisoformat(to_date)
+
+        report = regime_mod.build_regimes(conn, start, end, thresholds)
+        console.print(
+            f"{report.fechas_evaluadas} fechas evaluadas · "
+            f"{report.episodios_creados} episodios · "
+            f"{report.fechas_sin_clasificar} sin clasificar"
+        )
+        if report.faltantes_por_dimension:
+            for dim, count in sorted(report.faltantes_por_dimension.items(), key=lambda x: -x[1]):
+                console.print(f"  [yellow]falta {dim}: {count} fechas[/yellow]")
+        if report.episodios_creados == 0:
+            console.print("[red]no se creo ningun episodio: revisa que haya precios y macro cargados[/red]")
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@regimes_app.command("timeline")
+def regimes_timeline(ctx: typer.Context) -> None:
+    """Imprime la linea de tiempo de regimenes."""
+    from classify import regime as regime_mod
+
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        episodios = regime_mod.timeline(conn)
+        if not episodios:
+            console.print("[yellow]sin regimenes construidos[/yellow]")
+            return
+        table = Table("desde", "hasta", "tasas", "vol", "inflacion", "usd", "credito", "vix pct")
+        for row in episodios:
+            table.add_row(
+                row["start_date"], row["end_date"] or "abierto",
+                row["rate_regime"], row["vol_regime"], row["inflation_regime"],
+                row["usd_trend"], row["credit_regime"],
+                "-" if row["vix_pctile"] is None else f"{row['vix_pctile']:.2f}",
+            )
+        console.print(table)
+        console.print(f"{len(episodios)} episodios")
+    finally:
+        conn.close()
+
+
+@regimes_app.command("current")
+def regimes_current(ctx: typer.Context) -> None:
+    """Regimen vigente."""
+    from classify import regime as regime_mod
+
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        row = regime_mod.current_regime(conn)
+        if row is None:
+            console.print("[yellow]sin regimen abierto[/yellow]")
+            raise typer.Exit(code=1)
+        console.print(f"{row['regime_label']}  (desde {row['start_date']})")
+    finally:
+        conn.close()
+
+
+@regimes_app.command("check")
+def regimes_check(
+    ctx: typer.Context,
+    check_date: str = typer.Option(..., "--date"),
+) -> None:
+    """Clasifica una fecha suelta y muestra los insumos que uso."""
+    from classify import regime as regime_mod
+
+    thresholds = regime_mod.load_thresholds(_thresholds_path(ctx))
+    conn = dbmod.connect(_db_path(ctx))
+    try:
+        snapshot = regime_mod.classify_at(conn, date.fromisoformat(check_date), thresholds)
+        console.print(f"{check_date}: {regime_mod.snapshot_to_text(snapshot)}")
+        table = Table("insumo", "valor")
+        for nombre, valor in snapshot.inputs.items():
+            table.add_row(nombre, "-" if valor is None else str(valor))
+        if snapshot.vix_pctile is not None:
+            table.add_row("vix_pctile", f"{snapshot.vix_pctile:.3f}")
+        if snapshot.hy_oas_pctile is not None:
+            table.add_row("hy_oas_pctile", f"{snapshot.hy_oas_pctile:.3f}")
+        console.print(table)
     finally:
         conn.close()
 

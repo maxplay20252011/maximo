@@ -130,6 +130,36 @@ def get_latest_macro_as_known_at(
     return obs_date, float(row["value"])
 
 
+def get_series_window_as_known_at(
+    conn: sqlite3.Connection,
+    series_id: str,
+    start: date,
+    end: date,
+    as_of: datetime,
+) -> list[tuple[date, float]]:
+    """Serie entre dos fechas, cada observacion con el vintage vigente a `as_of`.
+
+    No es lo mismo que la serie de hoy recortada: cada punto se devuelve con el
+    valor que estaba publicado en `as_of`, revisiones posteriores incluidas solo
+    si son anteriores a esa fecha.
+    """
+    rows = conn.execute(
+        """SELECT obs_date, value, MAX(vintage_date) AS vintage_date
+           FROM macro_observations
+           WHERE series_id = ? AND vintage_date <= ?
+             AND obs_date BETWEEN ? AND ? AND value IS NOT NULL
+           GROUP BY obs_date ORDER BY obs_date""",
+        (series_id, as_of.date().isoformat(), start.isoformat(), end.isoformat()),
+    ).fetchall()
+    if rows:
+        require_visible(
+            "macro",
+            f"{series_id}@{start.isoformat()}..{end.isoformat()}",
+            max(date.fromisoformat(row["vintage_date"]) for row in rows),
+        )
+    return [(date.fromisoformat(row["obs_date"]), float(row["value"])) for row in rows]
+
+
 def get_revision_history(conn: sqlite3.Connection, series_id: str, obs_date: date) -> list[MacroObservation]:
     """Todos los vintages de una observacion. Sirve para ver cuanto se reviso."""
     rows = conn.execute(

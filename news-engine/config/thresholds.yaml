@@ -1,0 +1,53 @@
+# Todos los umbrales numericos del sistema. Nada de esto va en codigo (§0).
+# Los valores son los de §4, transcriptos sin cambios.
+#
+# Convencion de rangos: [lo, hi) — el limite inferior entra, el superior no.
+# El ultimo tramo de cada dimension cierra en su tope (incluye 1.00 / 99).
+
+regimes:
+  # Ventana movil para los percentiles, en dias calendario.
+  percentile_window_days: 1825          # 5 anios
+  # Minimo de observaciones en la ventana para calcular un percentil.
+  # Con menos, la dimension queda sin clasificar en vez de inventar un percentil
+  # sobre 40 datos.
+  percentile_min_observations: 500
+  # Paso de recalculo (§4: semanal).
+  step_days: 7
+
+  vol_regime:            # percentil de VIX, ventana movil 5 anios
+    serie: VIX
+    LOW:      [0.00, 0.25]
+    NORMAL:   [0.25, 0.75]
+    STRESSED: [0.75, 0.95]
+    CRISIS:   [0.95, 1.00]
+
+  rate_regime:           # cambio de tasa de politica en 6 meses
+    serie: DFF           # fed funds efectiva, vintages de ALFRED
+    meses: 6
+    # El orden de evaluacion es el de §4: ZIRP gana si la tasa es baja, aunque
+    # el cambio a 6 meses ya cumpla el umbral de HIKING.
+    ZIRP:        {policy_rate_max: 0.50}
+    HIKING:      {change_6m_min:  0.50}
+    CUTTING:     {change_6m_max: -0.50}
+    HIGH_STABLE: {default: true}
+
+  inflation_regime:      # core CPI YoY, vintage ALFRED
+    serie: CPILFESL
+    DEFLATIONARY: [-99.0, 1.0]
+    ANCHORED:     [1.0, 2.5]
+    ELEVATED:     [2.5, 5.0]
+    RUNAWAY:      [5.0, 99.0]
+
+  credit_regime:         # percentil HY OAS, 5 anios
+    serie: BAMLH0A0HYM2
+    TIGHT:  [0.00, 0.30]
+    NORMAL: [0.30, 0.70]
+    WIDE:   [0.70, 0.90]
+    STRESS: [0.90, 1.00]
+
+  usd_trend:             # retorno DXY 60 dias
+    serie: DXY
+    sesiones: 60
+    STRONG:  {min:  0.03}
+    WEAK:    {max: -0.03}
+    NEUTRAL: {default: true}
