@@ -548,6 +548,7 @@ const G = {
   dragLook:{active:false, lastX:0, lastY:0},
   input:{f:0,b:0,l:0,r:0,run:false,jump:false,mouseDown:false,jx:0,jy:0},
   player:null, enemies:[], projectiles:[], buildingAABBs:[], buildingMeshes:[], allies:[], friends:[],
+  slowZones:[], barrels:[],
   barrios:[], popups:[],
   startTime:0,
   orbitAngle:0,
@@ -559,6 +560,7 @@ const G = {
   nearTransitPoint:null,
   nearBuildingDoor:null,
   nearRecruit:null,
+  nearStash:null,
   // Streaming: recomputed on a timer (not every frame) in updateWorldStreaming.
   streamTimer:0,
   // Rideable motorcycle — see createVehicle()/updateVehicle().
@@ -612,6 +614,7 @@ function sfxHurt(){ beep(140,.18,'sawtooth',.14,70); }
 function sfxMoney(){ beep(660,.07,'sine',.1,880); }
 function sfxReload(){ beep(200,.1,'square',.08,320); }
 function sfxDeath(){ beep(200,.5,'sawtooth',.15,40); }
+function sfxExplosion(){ beep(90,.35,'sawtooth',.22,30); }
 function sfxDomination(){
   if(!G.soundOn||!G.audioCtx) return;
   [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.22,'triangle',.14),i*110));
@@ -701,6 +704,9 @@ function initScene(){
     barrio.buildingMeshes = [];     // this barrio's own building meshes (camera-collision raycast)
     barrio.transitPoints = [];      // this barrio's metro/bus/taxi station world positions
     barrio.pedestrians = [];        // cosmetic wandering NPCs — see spawnPedestrians()/updatePedestrians()
+    barrio.slowZones = [];          // pool circles etc — see updatePlayer's slow-zone check, rebuilt each stream-in
+    barrio.barrels = [];            // explosive fire barrels — see performAttack's barrel hit-check, rebuilt each stream-in
+    barrio.stash = null;            // this district's hidden alijo — chosen once (see spawnDistrictStash), persists like barrio.buildings
     barrio.friendAvailable = false; // a boss-lair defeat unlocks a recruitable companion — see offerRecruit()
     barrio.friendRecruited = false;
     barrio.recruitMesh = null;
@@ -930,7 +936,7 @@ const ENEMY_TYPES = {
   // Barrio Sur — Los Pesados: slow, tanky, melee/shotgun
   bruto:             {name:'Bruto',           outfit:0x1a1a1a, accessory:'none',    weaponProp:'hammer',      atkStyle:'melee',  hpMult:1.5, dmgMult:1.3, speedMult:.75,  rangeMult:1.1},
   mecanico:          {name:'Mecánico',        outfit:0x3d5aff, accessory:'none',    weaponProp:'wrench',      atkStyle:'melee',  hpMult:1.2, dmgMult:1.1, speedMult:.85,  rangeMult:1},
-  pandillero:        {name:'Pandillero',      outfit:0x2a2a2e, accessory:'none',    weaponProp:'pipe',        atkStyle:'melee',  hpMult:1.1, dmgMult:1.15,speedMult:.9,   rangeMult:1},
+  pandillero:        {name:'Pandillero',      outfit:0x2a2a2e, accessory:'none',    weaponProp:'pipe',        atkStyle:'melee',  hpMult:1.1, dmgMult:1.15,speedMult:.9,   rangeMult:1, grouped:true},
   matonSurElite:     {name:'Matón Sur',       outfit:0x1c1c20, accessory:'mask',    weaponProp:'shotgun',     atkStyle:'ranged', hpMult:2.3, dmgMult:1.5, speedMult:.8,   rangeMult:1.1, elite:true},
   // Barrio Este — Los Tecnológicos: ranged/tech
   hacker:            {name:'Hacker',          outfit:0x1a1a2e, accessory:'hoodMask',weaponProp:'tablet',      atkStyle:'ranged', hpMult:.8,  dmgMult:.9,  speedMult:1.0,  rangeMult:1.5},
@@ -943,11 +949,11 @@ const ENEMY_TYPES = {
   lenador:           {name:'Leñador',         outfit:0x8c3a28, accessory:'none',    weaponProp:'axe',         atkStyle:'melee',  hpMult:1.15,dmgMult:1.25,speedMult:1.1,  rangeMult:1},
   capatazElite:      {name:'Capataz',         outfit:0xb8321c, accessory:'hardHatRed', weaponProp:'jackhammer', atkStyle:'melee', hpMult:2.4, dmgMult:1.6, speedMult:1.0, rangeMult:1.1, elite:true},
   // Distrito Central — La Guardia del Rey: mixed, hardest
-  agente:            {name:'Agente',          outfit:0x14141a, accessory:'shades',  weaponProp:'pistol',      atkStyle:'ranged', hpMult:1.1, dmgMult:1.2, speedMult:1.1,  rangeMult:1.3},
+  agente:            {name:'Agente',          outfit:0x14141a, accessory:'shades',  weaponProp:'pistol',      atkStyle:'ranged', hpMult:1.1, dmgMult:1.2, speedMult:1.1,  rangeMult:1.3, grouped:true},
   guardiaPesado:     {name:'Guardia Pesado',  outfit:0x2a2a2e, accessory:'none',    weaponProp:'shield',      atkStyle:'melee',  hpMult:1.8, dmgMult:1.3, speedMult:.85,  rangeMult:1.1},
   francotirador:     {name:'Francotirador',   outfit:0x4a5540, accessory:'none',    weaponProp:'rifle',       atkStyle:'ranged', hpMult:.8,  dmgMult:1.6, speedMult:.7,   rangeMult:2.2, cooldownMult:1.6},
   demolicionista:    {name:'Demolicionista',  outfit:0x8a1c1c, accessory:'vest',    weaponProp:'grenade',     atkStyle:'ranged', hpMult:1.0, dmgMult:1.5, speedMult:.9,   rangeMult:1.4},
-  guardiaRealElite:  {name:'Guardia Real',    outfit:0x14141a, accessory:'tacticalHelmet', weaponProp:'assaultRifle', atkStyle:'ranged', hpMult:2.6, dmgMult:1.7, speedMult:1.0, rangeMult:1.6, elite:true},
+  guardiaRealElite:  {name:'Guardia Real',    outfit:0x14141a, accessory:'tacticalHelmet', weaponProp:'assaultRifle', atkStyle:'ranged', hpMult:2.6, dmgMult:1.7, speedMult:1.0, rangeMult:1.6, elite:true, grouped:true},
 };
 // Which regular types + which single elite type can spawn in each district
 // identity — both outdoor thugs and indoor defenders draw from this.
@@ -993,6 +999,38 @@ const BOSS_LAIR_DEFS = {
   oeste:   {bossKey:'lauti', type:'depositoFerroviario'},
   central: {bossKey:'dante', type:'municipalidad'},
 };
+// Each district's hidden alijo (stash) — 4 candidate spots (angle factor
+// 0-1 of a full turn + distance factor of `half`), one of which the
+// district's seeded rand() picks for THIS session — see spawnDistrictStash.
+// Rejugability without ever being un-findable: same 4 logical spots every
+// time, just a different one of the 4 holds the money this playthrough.
+const DISTRICT_STASH_CANDIDATES = {
+  residencialAlto:  [ {a:0.10,d:0.55,label:'detrás del cerco de una casa esquinera'}, {a:0.35,d:0.70,label:'en el depósito de un patio trasero'}, {a:0.62,d:0.40,label:'cerca del colegio'}, {a:0.85,d:0.60,label:'bajo las gradas del club deportivo'} ],
+  industrial:       [ {a:0.05,d:0.65,label:'entre los contenedores apilados'}, {a:0.28,d:0.35,label:'junto a la vía de tren'}, {a:0.55,d:0.55,label:'detrás de un galpón'}, {a:0.80,d:0.70,label:'cerca de las chimeneas de la fábrica'} ],
+  comercial:        [ {a:0.15,d:0.50,label:'en la base de una torre corporativa'}, {a:0.40,d:0.65,label:'cerca del centro de datos'}, {a:0.60,d:0.30,label:'bajo una pasarela'}, {a:0.90,d:0.55,label:'junto a una pantalla LED'} ],
+  residencialMedio: [ {a:0.08,d:0.60,label:'detrás de la capilla'}, {a:0.32,d:0.45,label:'entre la chatarra apilada'}, {a:0.58,d:0.65,label:'dentro de un vagón abandonado'}, {a:0.82,d:0.35,label:'cerca de un taller mecánico'} ],
+  financiero:       [ {a:0.12,d:0.55,label:'detrás del banco'}, {a:0.38,d:0.40,label:'cerca de la comisaría'}, {a:0.60,d:0.65,label:'junto a una fuente monumental'}, {a:0.88,d:0.50,label:'en la base de una torre corporativa'} ],
+};
+/* Places (once, persisted like barrio.buildings) this district's hidden
+   stash — one of 4 candidate spots, chosen by the district's own seeded
+   rand() so it's stable across reloads but varies district to district and
+   session to session (change the world seed = different candidate wins).
+   Collecting it is a one-time money bonus via tryInteract/G.nearStash. */
+function spawnDistrictStash(barrio, rand, half, plazaR){
+  const candidates = DISTRICT_STASH_CANDIDATES[barrio.layout];
+  if(!candidates) return; // home/plaza: no stash
+  if(!barrio.stash){
+    const pick = candidates[Math.floor(rand()*candidates.length)];
+    const ang = pick.a*Math.PI*2, dist = plazaR+(half-plazaR)*pick.d;
+    barrio.stash = { x:barrio.x+Math.cos(ang)*dist, z:barrio.z+Math.sin(ang)*dist, label:pick.label, collected:false, mesh:null };
+  }
+  if(!barrio.stash.collected && !barrio.stash.mesh){
+    const marker = makeStashMarker();
+    marker.position.set(barrio.stash.x, 0, barrio.stash.z);
+    barrio.detailGroup.add(marker);
+    barrio.stash.mesh = marker;
+  }
+}
 // Central has no post-boss recruit (Dante is the final boss, see
 // offerRecruit) — instead it gets its own standing squad of 5 friendly
 // NPCs, always present in the plaza and recruitable any time (no boss
@@ -1112,13 +1150,30 @@ function spawnBarrioEnemies(barrio){
   const engageScale = Math.min(1.6, 1 + (sizeScale-1)*0.35);
   const ringR = 14*sizeScale;
   const baseStats = { hp:60, dmg:8, speed:4.3, detect:28*engageScale, attackRange:19*engageScale, cooldown:1.35, moneyMin:20, moneyMax:40, powerReward:5 };
-  for(let i=0;i<barrio.thugs;i++){
-    const ang = (i/barrio.thugs)*Math.PI*2;
-    const ex = barrio.x + Math.cos(ang)*ringR;
-    const ez = barrio.z + Math.sin(ang)*ringR;
-    const useElite = i>0 && i%4===0; // one in four is the district's elite
-    const typeKey = useElite ? pool.elite : pool.regular[i%pool.regular.length];
-    spawnTypedEnemy(barrio, ex, ez, typeKey, baseStats);
+  // Seeded independently of the world-layout rand (own suffix) so changing
+  // building layout doesn't reshuffle who's on the street, and vice versa —
+  // same seed still means the same roster/positions every time (see the
+  // variation brief's determinism rule). 18% independent elite chance per
+  // roll (not a fixed "every 4th") and "grupal" types (see ENEMY_TYPES'
+  // grouped flag — pandillero, agente, guardiaReal) always spawn clustered
+  // in 2s/3s, never solo, per the brief.
+  const rand = makeSeededRandom(hashString(barrio.id+'_enemies'));
+  let spawned = 0, slot = 0;
+  while(spawned < barrio.thugs){
+    const useElite = rand() < 0.18;
+    const typeKey = useElite ? pool.elite : pool.regular[Math.floor(rand()*pool.regular.length)];
+    const t = ENEMY_TYPES[typeKey];
+    const groupSize = (t.grouped && barrio.thugs-spawned>=2) ? Math.min(2+Math.floor(rand()*2), barrio.thugs-spawned) : 1;
+    const baseAng = (slot/barrio.thugs)*Math.PI*2 + (rand()-.5)*0.6;
+    for(let g=0; g<groupSize && spawned<barrio.thugs; g++){
+      const ang = baseAng + g*0.35;
+      const r = ringR*(0.8+rand()*0.4);
+      const ex = barrio.x + Math.cos(ang)*r;
+      const ez = barrio.z + Math.sin(ang)*r;
+      spawnTypedEnemy(barrio, ex, ez, typeKey, baseStats);
+      spawned++;
+    }
+    slot++;
   }
 }
 
@@ -1302,23 +1357,26 @@ function makeSeededRandom(seed){
 // full 4-sided glass curtain-wall texture plus a cosmetic rooftop tower
 // extension (see instantiateBuildingMesh) so the skyline reads as far taller
 // than the 1-3 real interior floors the interior generator actually builds.
+// emptyLotChance: how often the random top-up pass in generateDistrictBuildings
+// skips a lot (see fillFactor there) — Norte reads as planned/uniform, Sur and
+// Oeste read as irregular/gap-toothed, Este and Central read as dense/consolidated.
 const DISTRICT_IDENTITY = {
-  plaza:        { heightRange:[4,10],  wallPalette:[0xcfc6ae,0xbfb6a0,0xd8d2c2,0x8a7355], roofPalette:[0x3a352c,0x4a4034], accentColor:0xffd700, parkSize:1.25, blockCount:3, treeDensity:1.0, carPalette:[0x1a1a20,0x8a1c24,0xd8d2c2], graffiti:false },
+  plaza:        { heightRange:[4,10],  wallPalette:[0xcfc6ae,0xbfb6a0,0xd8d2c2,0x8a7355], roofPalette:[0x3a352c,0x4a4034], accentColor:0xffd700, parkSize:1.25, blockCount:3, treeDensity:1.0, carPalette:[0x1a1a20,0x8a1c24,0xd8d2c2], graffiti:false, emptyLotChance:0.1 },
   // Norte — Los Elegantes: blanco/gris claro, madera clara, negro mate en
   // aberturas, luz cálida. Clean minimalist suburb, no grime.
-  residencialAlto: { heightRange:[5,11], wallPalette:[0xf5f5f0,0xd8d8d2,0xece8de,0xc9a876], roofPalette:[0x3a3a38,0x333333,0x242424], accentColor:0xf2e6c9, parkSize:1.6, blockCount:4, treeDensity:1.6, carPalette:[0x161618,0xd8d8dc,0x8a1c24,0x1c3a5a], graffiti:false },
+  residencialAlto: { heightRange:[5,11], wallPalette:[0xf5f5f0,0xd8d8d2,0xece8de,0xc9a876], roofPalette:[0x3a3a38,0x333333,0x242424], accentColor:0xf2e6c9, parkSize:1.6, blockCount:4, treeDensity:1.6, carPalette:[0x161618,0xd8d8dc,0x8a1c24,0x1c3a5a], graffiti:false, emptyLotChance:0.15 },
   // Sur — Los Pesados: ladrillo visto, hormigón sucio, óxido, chapa oxidada,
   // murales de gran escala curados (not random vandalism tags).
-  industrial:   { heightRange:[6,13],  wallPalette:[0x8b4a3a,0x6b6b63,0xb5541e,0x74645a,0x2b2b26], roofPalette:[0x3a2418,0x4a2e1e,0x2e2018], accentColor:0xd6742a, parkSize:0.55, blockCount:5, treeDensity:0.3, carPalette:[0x4a5560,0xb8321c,0x6b6b6b], graffiti:true, brickWalls:true, muralStyle:'curated' },
+  industrial:   { heightRange:[6,13],  wallPalette:[0x8b4a3a,0x6b6b63,0xb5541e,0x74645a,0x2b2b26], roofPalette:[0x3a2418,0x4a2e1e,0x2e2018], accentColor:0xd6742a, parkSize:0.55, blockCount:5, treeDensity:0.3, carPalette:[0x4a5560,0xb8321c,0x6b6b6b], graffiti:true, brickWalls:true, muralStyle:'curated', emptyLotChance:0.25 },
   // Este — Los Tecnológicos: negro/blanco frío, vidrio curtain wall, neón
   // azul eléctrico. Full glass towers, the most "alive" skyline at night.
-  comercial:    { heightRange:[6,16],  wallPalette:[0x0d0d0f,0x14141a,0x1a1a22,0xeaeaef], roofPalette:[0x08080a,0x2a3a4a], accentColor:0x00d4ff, accentColor2:0x8b5cf6, parkSize:0.85, blockCount:5, treeDensity:0.6, carPalette:[0xd63d3d,0x3d8bff,0xffe138,0xd8d2c2,0x1a1a20], graffiti:false, towerFacade:true },
+  comercial:    { heightRange:[6,16],  wallPalette:[0x0d0d0f,0x14141a,0x1a1a22,0xeaeaef], roofPalette:[0x08080a,0x2a3a4a], accentColor:0x00d4ff, accentColor2:0x8b5cf6, parkSize:0.85, blockCount:5, treeDensity:0.6, carPalette:[0xd63d3d,0x3d8bff,0xffe138,0xd8d2c2,0x1a1a20], graffiti:false, towerFacade:true, emptyLotChance:0.05 },
   // Oeste — Los Rebeldes: ladrillo rojo crudo sin revocar, chapa gris,
   // verde oxidado en portones, tierra ocre, grafitis rústicos (not curated).
-  residencialMedio: { heightRange:[3,6], wallPalette:[0x9c4a3c,0x8a8a82,0x6b5842,0xb2604a,0xc4a26b], roofPalette:[0x5a3a28,0x6b4a30,0x4a3220], accentColor:0x5c7a5e, parkSize:1.4, blockCount:5, treeDensity:1.2, carPalette:[0xd8d2c2,0x3d5aff,0x6b6b6b,0x8a1c24], graffiti:true, brickWalls:true, muralStyle:'rustic' },
+  residencialMedio: { heightRange:[3,6], wallPalette:[0x9c4a3c,0x8a8a82,0x6b5842,0xb2604a,0xc4a26b], roofPalette:[0x5a3a28,0x6b4a30,0x4a3220], accentColor:0x5c7a5e, parkSize:1.4, blockCount:5, treeDensity:1.2, carPalette:[0xd8d2c2,0x3d5aff,0x6b6b6b,0x8a1c24], graffiti:true, brickWalls:true, muralStyle:'rustic', emptyLotChance:0.35 },
   // Central — La Guardia del Rey: piedra clara, vidrio espejado, acentos
   // dorados, seguridad negra. Tallest, brightest, most-watched district.
-  financiero:   { heightRange:[16,40], wallPalette:[0xe8e4d8,0xdcd6c4,0x3a4a5a,0x4a5a6a,0xc8c2b0], roofPalette:[0x1e2228,0x24282e], accentColor:0xc9a227, parkSize:0.7, blockCount:4, treeDensity:0.9, carPalette:[0x161618,0xffd700,0xd8d8dc], graffiti:false, towerFacade:true },
+  financiero:   { heightRange:[16,40], wallPalette:[0xe8e4d8,0xdcd6c4,0x3a4a5a,0x4a5a6a,0xc8c2b0], roofPalette:[0x1e2228,0x24282e], accentColor:0xc9a227, parkSize:0.7, blockCount:4, treeDensity:0.9, carPalette:[0x161618,0xffd700,0xd8d8dc], graffiti:false, towerFacade:true, emptyLotChance:0 },
 };
 
 /* ============================================================
@@ -1703,10 +1761,12 @@ function makeSecurityCamera(){
   return g;
 }
 
-/* Glowing barrel fire — Oeste's "sensación de frontera sin ley" night
-   lighting, an emissive cone standing in for flame plus a real PointLight
-   so it actually lights up the immediate street at night, matching the
-   brief's "fogatas y luces improvisadas" atmosphere note. */
+/* Glowing barrel fire — Sur's "tambores con fuego" / Oeste's "fogatas en
+   tambores" night lighting: an emissive cone standing in for flame plus a
+   real PointLight so it actually lights up the immediate street at night.
+   flame/glow are tagged on userData so the explosive-barrel mechanic (see
+   barrio.barrels / performAttack / explodeBarrel) can toggle them off once
+   it's been shot. */
 function makeBarrelFire(){
   const g = new THREE.Group();
   const barrel = new THREE.Mesh(new THREE.CylinderGeometry(.35,.3,.6,10), new THREE.MeshStandardMaterial({color:0x3a3a38, metalness:.4, roughness:.7}));
@@ -1715,6 +1775,7 @@ function makeBarrelFire(){
   flame.position.y=.85; g.add(flame);
   const glow = new THREE.PointLight(0xff6a1a, 1.4, 9, 2);
   glow.position.y=.9; g.add(glow);
+  g.userData.flame = flame; g.userData.light = glow; g.userData.barrelMesh = barrel;
   return g;
 }
 
@@ -1756,6 +1817,97 @@ function makeGraffitiPlane(w,h,seedRand){
   const tex = new THREE.CanvasTexture(c);
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:.85}));
   return mesh;
+}
+
+/* ---------- district special elements (see DISTRICT_SPECIALS variation brief) ---------- */
+/* Norte backyard pool — flat blue disc + a slightly-raised concrete rim.
+   Registered by the caller as a slow zone (see barrio.slowZones/updatePlayer):
+   crossing it isn't blocked, just sluggish, so it reads as a real obstacle
+   without needing swim animations. */
+function makePileta(r){
+  const g = new THREE.Group();
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(r+.3,r+.3,.25,20), new THREE.MeshStandardMaterial({color:0xe5e2d8, roughness:.8}));
+  rim.position.y=.12; g.add(rim);
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(r,r,.1,20), new THREE.MeshStandardMaterial({color:0x2a8fc9, transparent:true, opacity:.8, metalness:.2, roughness:.1}));
+  water.position.y=.2; g.add(water);
+  return g;
+}
+/* Rusty scrap/junk pile — Oeste's "chatarra apilada visible desde la calle"
+   (half-repaired cars, at least 2 per manzana per the brief). Cover prop —
+   the caller registers its footprint into barrio.buildingAABBs. */
+function makeChatarraPile(rand){
+  const g = new THREE.Group();
+  const rustColors = [0x8a4a32, 0x6b6b63, 0x5a5248, 0x9c4a3c];
+  const n = 3+Math.floor(rand()*3);
+  for(let i=0;i<n;i++){
+    const s = 0.6+rand()*0.9;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(s,s*(0.5+rand()*0.6),s*(0.7+rand()*0.6)), new THREE.MeshStandardMaterial({color:rustColors[Math.floor(rand()*rustColors.length)], roughness:.95, metalness:.2}));
+    box.position.set((rand()-.5)*1.6, box.geometry.parameters.height/2, (rand()-.5)*1.6);
+    box.rotation.y = rand()*Math.PI*2;
+    box.castShadow=true;
+    g.add(box);
+  }
+  return g;
+}
+/* Abandoned freight car — Oeste's "vagones de tren abandonados" landmark
+   scenery (some volcado/tipped, per the brief), reusing the same
+   ribbed-container look as makeContainer but at rail-car scale. Cover prop. */
+function makeVagonAbandonado(tipped){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.2,3.4,13), new THREE.MeshStandardMaterial({color:0x5a4a3a, roughness:.9, metalness:.15}));
+  body.position.y=1.7; body.castShadow=true; body.receiveShadow=true; g.add(body);
+  for(let z=-6;z<=6;z+=2.2){
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(3.22,3.4,.1), new THREE.MeshStandardMaterial({color:shadeColor(0x5a4a3a,-0.25)}));
+    rib.position.set(0,1.7,z); g.add(rib);
+  }
+  const wheelMat = new THREE.MeshStandardMaterial({color:0x1a1a1a, metalness:.6});
+  [-5,5].forEach(z=>{
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.55,.55,3.4,10), wheelMat);
+    wheel.rotation.z = Math.PI/2; wheel.position.set(0,.55,z); g.add(wheel);
+  });
+  if(tipped){ g.rotation.z = Math.PI*0.42; g.position.y = 1.4; }
+  return g;
+}
+/* Digital ad screen for Este's tower facades ("pantallas publicitarias
+   dinámicas" — reuses makeBillboard's canvas-texture panel but mounted flat
+   against a wall instead of on legs, since it's meant to read as part of
+   the building skin, not street furniture standing in front of it. */
+function makeFacadeScreen(w,h,text,glowColor){
+  const c = document.createElement('canvas');
+  c.width=512; c.height=Math.round(512*h/w);
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,512,c.height);
+  const glow = '#'+new THREE.Color(glowColor).getHexString();
+  grad.addColorStop(0,'#05050a'); grad.addColorStop(1,glow);
+  ctx.fillStyle=grad; ctx.fillRect(0,0,512,c.height);
+  ctx.fillStyle='#fff'; ctx.font='bold 40px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, 256, c.height/2);
+  const tex = new THREE.CanvasTexture(c);
+  return new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshBasicMaterial({map:tex}));
+}
+/* Reactive LED pavement strip — Este's "pavimento con líneas LED embebidas".
+   Purely decorative pulse (no real position-reveal mechanic — a genuine
+   proximity-reactive shader/uniform system was out of scope for this pass),
+   an emissive strip near the plaza that reads as "smart city" dressing. */
+function makeLedPavementStrip(length){
+  const g = new THREE.Group();
+  const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.35,length), new THREE.MeshStandardMaterial({color:0x00d4ff, emissive:0x00d4ff, emissiveIntensity:1.4}));
+  strip.rotation.x=-Math.PI/2; strip.position.y=0.04; g.add(strip);
+  return g;
+}
+/* Glowing crate marking a district's hidden stash (see DISTRICT_STASH
+   candidates / spawnDistrictStash) — the one prop in the whole city meant to
+   stand out and say "dig here", so it gets an actual emissive glow instead
+   of blending into the street furniture. */
+function makeStashMarker(){
+  const g = new THREE.Group();
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(1.1,1.0,1.1), new THREE.MeshStandardMaterial({color:0x6b5230, roughness:.85}));
+  crate.position.y=.5; crate.castShadow=true; g.add(crate);
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(.22,10,10), new THREE.MeshStandardMaterial({color:0xffd700, emissive:0xffd700, emissiveIntensity:1.6}));
+  glow.position.y=1.15; g.add(glow);
+  const light = new THREE.PointLight(0xffd700, 1.1, 7, 2);
+  light.position.y=1.15; g.add(light);
+  return g;
 }
 
 /* ---------- indoor furniture (used by buildInterior, one per FURNITURE_SETS entry) ---------- */
@@ -2084,7 +2236,8 @@ function buildBarrioDetail(barrio){
   if(barrio.id==='central') spawnCentralAllies(barrio, plazaR);
   const occupied = barrio.buildings.map(b=>({x:b.x, z:b.z, hw:b.w/2+1, hd:b.d/2+1}));
   scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, occupied);
-  scatterDistrictLandmarks(barrio, rand, half, plazaR, identity);
+  scatterDistrictLandmarks(barrio, rand, half, plazaR, identity, parkCX, parkCZ, parkR);
+  spawnDistrictStash(barrio, rand, half, plazaR);
 }
 
 /* Central's 5 standing companions (see CENTRAL_ALLIES) — spread around the
@@ -2181,8 +2334,44 @@ function scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, i
    to ONE particular barrio's character (chimneys/containers/rail spur +
    graffiti for Sur, fountain/monument/billboards for Central,
    church/sports court for Oeste) rather than every district alike. */
-function scatterDistrictLandmarks(barrio, rand, half, plazaR, identity){
-  if(barrio.layout==='industrial'){
+/* Registers a fire barrel (tambor/fogata) into barrio.barrels — see
+   performAttack's barrel hit-check and explodeBarrel — so it's both a real
+   light source AND a real explosive prop, not just decoration. */
+function addBarrel(barrio, x, z){
+  const fire = makeBarrelFire();
+  fire.position.set(x,0,z);
+  barrio.detailGroup.add(fire);
+  barrio.barrels.push({group:fire, x, z, r:1.3, exploded:false});
+}
+/* Registers a static prop's footprint as real cover: pushed into the SAME
+   buildingAABBs list buildings use, so it blocks player movement, camera
+   clipping AND projectiles for free (see resolveBuildingCollision/updateProjectiles). */
+function addCoverAABB(barrio, x, z, hw, hd){
+  barrio.buildingAABBs.push({minX:x-hw, maxX:x+hw, minZ:z-hd, maxZ:z+hd});
+}
+
+function scatterDistrictLandmarks(barrio, rand, half, plazaR, identity, parkCX, parkCZ, parkR){
+  if(barrio.layout==='residencialAlto'){
+    // Norte — piletas en ~30% de las casas (slow zone, not a wall — see
+    // updatePlayer's slowZones check) + una cancha de básquet cerca de la plaza.
+    if(barrio.buildings){
+      barrio.buildings.filter(b=>b.type==='casa').forEach(b=>{
+        if(rand()<0.3){
+          const r = 2.0+rand()*0.8;
+          const px = b.x, pz = b.z-b.d/2-r-1.4; // "patio trasero" — offset off the back wall
+          const pool = makePileta(r);
+          pool.position.set(px,0,pz);
+          barrio.detailGroup.add(pool);
+          barrio.slowZones.push({x:px, z:pz, r:r+0.3, mult:0.5});
+        }
+      });
+    }
+    const courtA = rand()*Math.PI*2, courtD = plazaR+11;
+    const court = makeSportsCourt();
+    court.position.set(barrio.x+Math.cos(courtA)*courtD, 0, barrio.z+Math.sin(courtA)*courtD);
+    court.rotation.y = courtA;
+    barrio.detailGroup.add(court);
+  } else if(barrio.layout==='industrial'){
     const edgeA = rand()*Math.PI*2;
     const ex = barrio.x+Math.cos(edgeA)*half*0.85, ez = barrio.z+Math.sin(edgeA)*half*0.85;
     const track = makeTrainTrack(half*0.9);
@@ -2195,22 +2384,56 @@ function scatterDistrictLandmarks(barrio, rand, half, plazaR, identity){
       stack.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
       barrio.detailGroup.add(stack);
     }
+    // Contenedores apilados — real cover (blocks movement + projectiles),
+    // not just scenery ("mínimo 6 distribuidos en el distrito").
     const containerColors = [0xb8321c,0x3d5aff,0x3ddc84,0xe6c65c];
-    for(let i=0;i<5;i++){
+    for(let i=0;i<6;i++){
       const a=rand()*Math.PI*2, d=half*(0.2+rand()*0.6);
+      const x=barrio.x+Math.cos(a)*d, z=barrio.z+Math.sin(a)*d;
       const cont = makeContainer(containerColors[Math.floor(rand()*containerColors.length)]);
       cont.rotation.y = rand()*Math.PI*2;
-      cont.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
+      cont.position.set(x,0,z);
       barrio.detailGroup.add(cont);
+      addCoverAABB(barrio, x, z, 3.2, 1.3);
+    }
+    // Tambores con fuego — explosive (see addBarrel/explodeBarrel).
+    for(let i=0;i<4;i++){
+      const a=rand()*Math.PI*2, d=half*(0.25+rand()*0.5);
+      addBarrel(barrio, barrio.x+Math.cos(a)*d, barrio.z+Math.sin(a)*d);
+    }
+  } else if(barrio.layout==='comercial'){
+    // Este — pantallas LED gigantes en fachadas de torres + pavimento LED
+    // reactivo cerca de la plaza (decorativo — ver nota en makeLedPavementStrip).
+    const towers = (barrio.buildings||[]).filter(b=>b.type==='torreCorporativa');
+    const screenTexts = ['GLORIOSO TECH','RED NEURAL 24/7','DRONE DELIVERY'];
+    towers.slice(0,4).forEach((b,i)=>{
+      const screen = makeFacadeScreen(Math.min(b.w*0.7,4.5), 2.2, screenTexts[i%screenTexts.length], i%2?identity.accentColor2:identity.accentColor);
+      screen.position.set(b.x, b.h*0.55, b.z+b.d/2+0.05);
+      barrio.detailGroup.add(screen);
+    });
+    for(let i=0;i<5;i++){
+      const a=(i/5)*Math.PI*2+0.2, r=plazaR+3.4;
+      const strip = makeLedPavementStrip(6);
+      strip.position.set(barrio.x+Math.cos(a)*r, 0, barrio.z+Math.sin(a)*r);
+      strip.rotation.y = a;
+      barrio.detailGroup.add(strip);
     }
   } else if(barrio.layout==='financiero'){
+    // Fuentes monumentales — mínimo 2, per the brief.
     const fountain = makeFountain();
     fountain.position.set(barrio.x, 0, barrio.z);
     barrio.detailGroup.add(fountain);
+    addCoverAABB(barrio, barrio.x, barrio.z, 2.3, 2.3);
     const monA = Math.PI*0.5;
     const monument = makeMonument();
     monument.position.set(barrio.x+Math.cos(monA)*(half*0.45), 0, barrio.z+Math.sin(monA)*(half*0.45));
     barrio.detailGroup.add(monument);
+    const f2A = rand()*Math.PI*2, f2D = half*0.6;
+    const fx = barrio.x+Math.cos(f2A)*f2D, fz = barrio.z+Math.sin(f2A)*f2D;
+    const fountain2 = makeFountain();
+    fountain2.position.set(fx,0,fz);
+    barrio.detailGroup.add(fountain2);
+    addCoverAABB(barrio, fx, fz, 2.3, 2.3);
     const billboardTexts = ['GLORIOSO S.A.','BANCO CENTRAL','INVERTÍ HOY'];
     for(let i=0;i<2;i++){
       const a=rand()*Math.PI*2, d=half*0.7;
@@ -2235,18 +2458,31 @@ function scatterDistrictLandmarks(barrio, rand, half, plazaR, identity){
     church.position.set(barrio.x+Math.cos(cA)*cD, 0, barrio.z+Math.sin(cA)*cD);
     church.rotation.y = cA+Math.PI;
     barrio.detailGroup.add(church);
-    const court = makeSportsCourt();
-    const sA = cA+Math.PI*0.6, sD = half*0.5;
-    court.position.set(barrio.x+Math.cos(sA)*sD, 0, barrio.z+Math.sin(sA)*sD);
-    court.rotation.y = rand()*Math.PI*2;
-    barrio.detailGroup.add(court);
-    // Barrel fires scattered through the baldíos — "fogatas y luces
-    // improvisadas... sensación de frontera sin ley" at night.
-    for(let i=0;i<4;i++){
+    // Vagones de tren abandonados — landmark principal, cobertura pesada.
+    const vagonCount = 2;
+    for(let i=0;i<vagonCount;i++){
+      const a=cA+Math.PI*0.6+i*0.5, d=half*0.5;
+      const x=barrio.x+Math.cos(a)*d, z=barrio.z+Math.sin(a)*d;
+      const vagon = makeVagonAbandonado(rand()<0.4);
+      vagon.rotation.y = rand()*Math.PI*2;
+      vagon.position.set(x,0,z);
+      barrio.detailGroup.add(vagon);
+      addCoverAABB(barrio, x, z, 7, 2);
+    }
+    // Chatarra apilada — mínimo 2 por manzana per the brief; approximated
+    // here as several piles scattered through the district.
+    for(let i=0;i<6;i++){
+      const a=rand()*Math.PI*2, d=half*(0.2+rand()*0.6);
+      const x=barrio.x+Math.cos(a)*d, z=barrio.z+Math.sin(a)*d;
+      const pile = makeChatarraPile(rand);
+      pile.position.set(x,0,z);
+      barrio.detailGroup.add(pile);
+      addCoverAABB(barrio, x, z, 1.4, 1.4);
+    }
+    // Fogatas en tambores — más densidad que Sur per the brief, explosive.
+    for(let i=0;i<6;i++){
       const a=rand()*Math.PI*2, d=half*(0.25+rand()*0.55);
-      const fire = makeBarrelFire();
-      fire.position.set(barrio.x+Math.cos(a)*d, 0, barrio.z+Math.sin(a)*d);
-      barrio.detailGroup.add(fire);
+      addBarrel(barrio, barrio.x+Math.cos(a)*d, barrio.z+Math.sin(a)*d);
     }
   }
 
@@ -2320,8 +2556,14 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
   // Small random top-up on top of the guaranteed minimums below (was the
   // ONLY source of buildings before DISTRICT_BUILDING_MINIMUMS existed —
   // now just adds a little variety/replay value, since the minimums already
-  // carry most of each district's target building count).
-  const targetCount = 2 + Math.floor(rand()*3);
+  // carry most of each district's target building count). Scaled by the
+  // district's emptyLotChance (see DISTRICT_IDENTITY) so Norte/Central fill
+  // in denser and Sur/Oeste stay visibly gappier — the "qué lotes quedan
+  // vacíos" rule from the variation brief, adapted to this rejection-sampled
+  // placement model (there's no literal lot grid to skip cells in).
+  const identity = DISTRICT_IDENTITY[barrio.layout] || DISTRICT_IDENTITY.plaza;
+  const fillFactor = 1-(identity.emptyLotChance||0);
+  const targetCount = Math.round((3+rand()*5)*fillFactor);
   const placed = [];
   const buildings = [];
   const GAP = 6;
@@ -2477,7 +2719,10 @@ function instantiateBuildingMesh(b){
   // district's two accent colors; everyone else only gets front/back glass
   // (still reads as openings without paying for a texture on every face).
   if(b.h>5.5){
-    const cols = Math.max(2, Math.round(b.w/2.6));
+    // ±1 column jitter (seeded, so it's stable across streaming rebuilds) —
+    // explicit per-building "cantidad de ventanas" variation on top of what
+    // already falls out of w/h differing building to building.
+    const cols = Math.max(2, Math.round(b.w/2.6) + Math.floor(matRand()*3)-1);
     const rows = Math.max(1, Math.round((b.h-plinthH)/3.1));
     const winTex = makeWindowGridTexture(cols, rows, identity.accentColor, identity.towerFacade?identity.accentColor2:null);
     const winMat = new THREE.MeshBasicMaterial({map:winTex});
@@ -2921,25 +3166,32 @@ function unbuildBarrioDetail(barrio){
   barrio.buildingAABBs.length = 0;
   barrio.buildingMeshes.length = 0;
   barrio.pedestrians.length = 0; // meshes already disposed above (they lived in detailGroup)
+  barrio.slowZones.length = 0;   // pool circles etc — meshes already disposed above, rebuilt fresh next stream-in
+  barrio.barrels.length = 0;     // fire barrels — same as slowZones, not persisted, rebuilt fresh
   // Building OWNERSHIP/PROGRESS (barrio.buildings) is never cleared here —
   // only the mesh references, since those specific mesh instances were just
   // disposed above and get recreated fresh next time this district streams
   // back in (see instantiateBuildingMesh).
   if(barrio.buildings) barrio.buildings.forEach(b=>{ b.mesh=null; b.roofMesh=null; b.doorMesh=null; b.signMesh=null; b.emblemMesh=null; });
   if(barrio.centralAllies) barrio.centralAllies.forEach(a=>{ a.mesh=null; }); // recruited/spot state persists, only the mesh was just disposed above
+  if(barrio.stash) barrio.stash.mesh=null; // collected state persists, only the mesh was just disposed above
 }
 
 // G.buildingAABBs/buildingMeshes (used by player/camera/enemy collision) are
 // just the union of whichever barrios currently have their detail loaded —
 // recomputed only when streaming actually adds/removes a district, not
-// every frame.
+// every frame. G.slowZones/G.barrels ride along the same recompute.
 function refreshGlobalBuildingLists(){
   G.buildingAABBs = [];
   G.buildingMeshes = [];
+  G.slowZones = [];
+  G.barrels = [];
   G.barrios.forEach(b=>{
     if(!b.detailBuilt) return;
     for(let i=0;i<b.buildingAABBs.length;i++) G.buildingAABBs.push(b.buildingAABBs[i]);
     for(let i=0;i<b.buildingMeshes.length;i++) G.buildingMeshes.push(b.buildingMeshes[i]);
+    for(let i=0;i<b.slowZones.length;i++) G.slowZones.push(b.slowZones[i]);
+    for(let i=0;i<b.barrels.length;i++) G.barrels.push(b.barrels[i]);
   });
 }
 
@@ -3101,6 +3353,7 @@ function updateInteractionHint(){
   G.nearTransitPoint = null;
   G.nearBuildingDoor = null;
   G.nearRecruit = null;
+  G.nearStash = null;
   if(G.interior.active){
     const et = G.interior.exitTrigger;
     if(et && Math.hypot(pp.x-et.x, pp.z-et.z) < 3){
@@ -3126,6 +3379,13 @@ function updateInteractionHint(){
     G.nearRecruit = recruit;
     const recruitLabel = recruit.type==='central' ? recruit.ally.name : 'amigo';
     hint.textContent = key+' para reclutar a '+recruitLabel+' 👥';
+    hint.classList.add('show');
+    return;
+  }
+  const stash = findNearbyStash();
+  if(stash){
+    G.nearStash = stash;
+    hint.textContent = key+' para revisar el alijo 💰';
     hint.classList.add('show');
     return;
   }
@@ -3174,8 +3434,30 @@ function tryInteract(){
     return;
   }
   if(G.nearRecruit){ recruitFriend(G.nearRecruit); return; }
+  if(G.nearStash){ collectStash(G.nearStash); return; }
   if(G.nearBuildingDoor){ enterBuilding(G.nearBuildingDoor); return; }
   if(G.nearTransitPoint) openCityMap();
+}
+
+/* ---------- hidden district stash (alijo) — see DISTRICT_STASH_CANDIDATES/spawnDistrictStash ---------- */
+function findNearbyStash(){
+  const pp = G.player.group.position;
+  let found=null;
+  G.barrios.forEach(b=>{
+    const s = b.stash;
+    if(!s || s.collected) return;
+    if(Math.hypot(pp.x-s.x, pp.z-s.z) < 2.6) found = s;
+  });
+  return found;
+}
+function collectStash(stash){
+  if(stash.collected) return;
+  stash.collected = true;
+  if(stash.mesh){ G.scene.remove(stash.mesh); stash.mesh=null; }
+  const reward = 150+Math.floor(Math.random()*150);
+  G.player.money += reward;
+  sfxMoney();
+  spawnDamagePopup(new THREE.Vector3(stash.x,2,stash.z), '💰 Alijo +$'+reward, '#ffd700');
 }
 
 /* ---------- Fast Travel city map ---------- */
@@ -3554,7 +3836,15 @@ function updatePlayer(dt){
   mx += fx*(-G.input.jy) + rx*G.input.jx;
   mz += fz*(-G.input.jy) + rz*G.input.jx;
   let len = Math.hypot(mx,mz);
-  const speed = G.vehicle.mounted ? G.vehicle.speed : ((G.input.run || len>0.85) ? 7.6 : 4.6);
+  let speed = G.vehicle.mounted ? G.vehicle.speed : ((G.input.run || len>0.85) ? 7.6 : 4.6);
+  // Slow zones (Norte's piletas — see scatterDistrictLandmarks/DISTRICT
+  // specials) — crossing one isn't blocked, just sluggish.
+  if(!G.vehicle.mounted && !G.interior.active){
+    for(let i=0;i<G.slowZones.length;i++){
+      const zone = G.slowZones[i];
+      if(Math.hypot(pl.group.position.x-zone.x, pl.group.position.z-zone.z) < zone.r){ speed *= zone.mult; break; }
+    }
+  }
   if(len>1){ mx/=len; mz/=len; len=1; }
   let nx = pl.group.position.x + mx*speed*dt;
   let nz = pl.group.position.z + mz*speed*dt;
@@ -3655,6 +3945,7 @@ function performAttack(){
         hitAny=true;
       }
     });
+    meleeHitBarrels(pp, fx, fz, w.range, w.angle/2);
     if(hitAny){
       flashCrosshair();
       pl.comboCount = Math.min(5, pl.comboCount+1);
@@ -3686,10 +3977,51 @@ function performAttack(){
         damageEnemy(en, w.dmg*pl.dmgMult, hits[0].point);
         hitAny=true;
       }
+      rayHitBarrels(origin, dir, w.range);
     }
     if(hitAny) flashCrosshair();
     if(w.mag<=0 && w.reserve>0) tryReload();
   }
+}
+
+/* ---------- explosive fire barrels (tambores/fogatas — see addBarrel/DISTRICT specials) ---------- */
+function meleeHitBarrels(pp, fx, fz, range, halfAngle){
+  G.barrels.forEach(b=>{
+    if(b.exploded) return;
+    const dx=b.x-pp.x, dz=b.z-pp.z, dist=Math.hypot(dx,dz);
+    if(dist>range) return;
+    const dot = (dx/dist)*fx + (dz/dist)*fz;
+    const angle = Math.acos(Math.max(-1,Math.min(1,dot)));
+    if(angle < halfAngle) explodeBarrel(b);
+  });
+}
+function rayHitBarrels(origin, dir, maxDist){
+  G.barrels.forEach(b=>{
+    if(b.exploded) return;
+    // Closest point on the aim ray to the barrel's (x,z), clamped to the ray's length.
+    const ox=b.x-origin.x, oz=b.z-origin.z;
+    const t = Math.max(0, Math.min(maxDist, ox*dir.x+oz*dir.z));
+    const px = origin.x+dir.x*t, pz = origin.z+dir.z*t;
+    if(Math.hypot(b.x-px, b.z-pz) < b.r+0.3) explodeBarrel(b);
+  });
+}
+function explodeBarrel(barrel){
+  if(barrel.exploded) return;
+  barrel.exploded = true;
+  barrel.group.userData.flame.visible = false;
+  barrel.group.userData.light.visible = false;
+  barrel.group.userData.barrelMesh.material.color.set(0x1a1a1a);
+  sfxExplosion();
+  const AOE_R = 5.5, AOE_DMG = 45;
+  G.enemies.forEach(en=>{
+    if(!en.alive) return;
+    const d = Math.hypot(en.group.position.x-barrel.x, en.group.position.z-barrel.z);
+    if(d<AOE_R) damageEnemy(en, AOE_DMG*(1-d/AOE_R*0.5));
+  });
+  const pp = G.player.group.position;
+  const pd = Math.hypot(pp.x-barrel.x, pp.z-barrel.z);
+  if(pd<AOE_R) damagePlayer(Math.round(AOE_DMG*0.6*(1-pd/AOE_R*0.5)));
+  spawnDamagePopup(new THREE.Vector3(barrel.x,1.2,barrel.z), '💥 -'+AOE_DMG, '#ff8c2a');
 }
 
 function flashCrosshair(){
@@ -4451,6 +4783,7 @@ function resetGame(){
     if(b.recruitMesh){ G.scene.remove(b.recruitMesh); b.recruitMesh=null; }
     b.recruitSpot=null;
     if(b.centralAllies) b.centralAllies.forEach(a=>{ a.recruited=false; a.mesh=null; }); // meshes are torn down by unbuildBarrioDetail below and respawned fresh by buildBarrioDetail
+    if(b.stash){ b.stash.collected=false; b.stash.mesh=null; } // same spot every reset (seed unchanged) — mesh respawned fresh by buildBarrioDetail below
     if(b.buildings){
       b.buildings.forEach(bld=>{
         bld.owned=false;
