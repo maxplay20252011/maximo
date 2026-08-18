@@ -186,6 +186,12 @@ body.touch-mode.portrait #portraitHint{display:flex;}
   background:rgba(0,0,0,.55);padding:6px 16px;border-radius:8px;opacity:0;transition:opacity .3s;text-align:center;}
 #hint.show{opacity:1;}
 
+#dialogueBox{position:absolute;bottom:130px;left:50%;transform:translateX(-50%);color:#e8e2cf;font-size:.85rem;
+  background:rgba(10,10,14,.8);border:1px solid rgba(255,215,0,.35);padding:9px 20px;border-radius:9px;
+  opacity:0;transition:opacity .3s;text-align:center;max-width:min(80vw,480px);pointer-events:none;}
+#dialogueBox.show{opacity:1;}
+#dialogueBox b{color:var(--gold);}
+
 #comboText{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%) scale(.85);color:#ffd700;font-size:1.5rem;
   font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,.8);opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;letter-spacing:1px;}
 #comboText.show{opacity:1;transform:translate(-50%,-50%) scale(1);}
@@ -311,6 +317,7 @@ body.touch-mode.portrait #portraitHint{display:flex;}
   <div id="crosshair"><div id="crosshairDot"></div></div>
   <div id="banner"></div>
   <div id="hint"></div>
+  <div id="dialogueBox"></div>
   <div id="comboText"></div>
 </div>
 
@@ -561,6 +568,7 @@ const G = {
   nearBuildingDoor:null,
   nearRecruit:null,
   nearStash:null,
+  nearCivilian:null,
   // Streaming: recomputed on a timer (not every frame) in updateWorldStreaming.
   streamTimer:0,
   // Rideable motorcycle — see createVehicle()/updateVehicle().
@@ -2338,7 +2346,7 @@ function scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, i
   const PED_DENSITY = { plaza:1, residencialAlto:1, industrial:0.4, comercial:1.7, residencialMedio:0.9, financiero:1.8 };
   const density = PED_DENSITY[barrio.layout] || 1;
   const pedCount = Math.round((4+rand()*3)*density);
-  spawnPedestrians(barrio, rand, pedCount, plazaR);
+  spawnPedestrians(barrio, rand, pedCount, plazaR, parkCX, parkCZ, parkR);
 
   // Security cameras on the plaza ring — Norte's "zona vigilada" identity
   // and Central's "seguridad de alta densidad" (more of them, per the brief).
@@ -2529,14 +2537,48 @@ function scatterDistrictLandmarks(barrio, rand, half, plazaR, identity, parkCX, 
   }
 }
 
-/* Cosmetic wandering pedestrians — pure "the city feels alive" set dressing,
-   same lightweight pattern as the ally patrol NPCs added for district
-   control: no detect/attack/hp, just a slow random-waypoint wander, so they
-   stay cheap and never touch the enemy/projectile/collision code. Tracked
-   per-barrio (not globally) so unbuildBarrioDetail can clear exactly this
-   district's pedestrians when its detail streams out. */
-function spawnPedestrians(barrio, rand, count, plazaR){
+// Civilian dialogue lines by role, 2-tier (this barrio owned by Fran, or
+// not) — a simple stand-in for a full reputation system, which this game
+// doesn't have. Adapted from a much larger reputation-driven dialogue table;
+// trimmed to what barrio.owned can actually answer.
+const CIVIL_DIALOGUES = {
+  peaton: {
+    owned:   ['Desde que estás vos, esto está más tranquilo.', '¡Gracias por lo del otro día!', 'Acá todos hablan bien de vos.'],
+    neutral: ['Buenas.', 'Andá con cuidado por acá.', 'Hoy está movido el barrio.'],
+  },
+  sentado: {
+    owned:   ['Vos sí que cambiaste las cosas por acá.', 'Sentate un rato, contame cómo va todo.'],
+    neutral: ['Lindo día, ¿no?', 'Hace años que vengo a este banco.'],
+  },
+  quieto: {
+    owned:   ['Para vos, lo que necesites.', 'Pasá cuando quieras.'],
+    neutral: ['¿Buscás algo?', 'Estoy ocupado, disculpá.'],
+  },
+};
+const CIVIL_ROLE_NAMES = { peaton:'Vecino', sentado:'Vecino sentado', quieto:'Vecino' };
+// Combat that should make nearby civilians flee: any live enemy actively
+// fighting (state==='combat') within FLEE_DETECT_RADIUS. Cheap — enemy
+// counts per loaded district are tiny (~5-6).
+const FLEE_DETECT_RADIUS = 16;
+function isCombatNear(x,z){
+  for(let i=0;i<G.enemies.length;i++){
+    const e = G.enemies[i];
+    if(e.alive && e.state==='combat' && Math.hypot(e.group.position.x-x, e.group.position.z-z) < FLEE_DETECT_RADIUS) return e;
+  }
+  return null;
+}
+
+/* Cosmetic pedestrians — "the city feels alive" set dressing, no detect/
+   attack/hp, so they never touch the enemy/projectile/collision code. Three
+   roles: 'peaton' (wanders, can talk), 'sentado' (sits near the park, can
+   talk), 'quieto' (stands in place near the plaza, can talk) — all three
+   react the same way to nearby combat: they flee, pause shaken, then resume.
+   Tracked per-barrio (not globally) so unbuildBarrioDetail can clear exactly
+   this district's pedestrians when its detail streams out. */
+function spawnPedestrians(barrio, rand, count, plazaR, parkCX, parkCZ, parkR){
   for(let i=0;i<count;i++){
+    const roll = rand();
+    const role = roll<0.6 ? 'peaton' : (roll<0.85 ? 'sentado' : 'quieto');
     const group = new THREE.Group();
     const shirtColors = [0x3d5aff,0xe63946,0x3ddc84,0xe8c94a,0x8a5aa8,0xd8d2c2,0x2a2a2e];
     const shirt = shirtColors[Math.floor(rand()*shirtColors.length)];
@@ -2544,12 +2586,29 @@ function spawnPedestrians(barrio, rand, count, plazaR){
     body.position.y=.85; body.castShadow=true; group.add(body);
     const head = new THREE.Mesh(new THREE.SphereGeometry(.22,10,10), new THREE.MeshStandardMaterial({color:0xE0A878}));
     head.position.y=1.42; group.add(head);
-    const a = rand()*Math.PI*2, r = plazaR+rand()*20;
-    group.position.set(barrio.x+Math.cos(a)*r, 0, barrio.z+Math.sin(a)*r);
+    // 'sentado' reads as sitting by squashing the whole figure down — no
+    // separate leg geometry to actually bend, same low-poly-primitive
+    // approach as the rest of this file's NPCs.
+    if(role==='sentado') group.scale.y = 0.6;
+
+    let x, z;
+    if(role==='sentado'){
+      // Biased toward the park (where the benches statistically are — see
+      // addParkZone) instead of tracking literal bench mesh positions.
+      const a=rand()*Math.PI*2, r=rand()*parkR*0.85;
+      x = parkCX+Math.cos(a)*r; z = parkCZ+Math.sin(a)*r;
+    } else {
+      const a = rand()*Math.PI*2, r = plazaR+rand()*20;
+      x = barrio.x+Math.cos(a)*r; z = barrio.z+Math.sin(a)*r;
+    }
+    group.position.set(x,0,z);
+    group.rotation.y = rand()*Math.PI*2;
     barrio.detailGroup.add(group);
     barrio.pedestrians.push({
-      group, center:{x:barrio.x,z:barrio.z}, radius:plazaR+22,
-      waypoint:{x:group.position.x,z:group.position.z}, speed:0.9+rand()*0.7,
+      group, role, center:{x:barrio.x,z:barrio.z}, radius:plazaR+22,
+      waypoint:{x,z}, baseSpeed: role==='peaton' ? 0.9+rand()*0.7 : 0,
+      state:'idle', timer:0, fleeDir:null,
+      talkCooldown:0,
     });
   }
 }
@@ -2557,18 +2616,78 @@ function updatePedestrians(dt){
   G.barrios.forEach(barrio=>{
     if(!barrio.detailBuilt) return;
     barrio.pedestrians.forEach(p=>{
+      if(p.talkCooldown>0) p.talkCooldown -= dt;
+
+      // Fleeing takes priority over anything else, for every role — even
+      // roles that normally never move (sentado/quieto) will get up and run.
+      if(p.state!=='fleeing' && p.state!=='shaken'){
+        const threat = isCombatNear(p.group.position.x, p.group.position.z);
+        if(threat){
+          const dx=p.group.position.x-threat.group.position.x, dz=p.group.position.z-threat.group.position.z;
+          const d=Math.hypot(dx,dz)||1;
+          const jitter = (Math.random()-.5)*1.2;
+          const cos=Math.cos(jitter), sin=Math.sin(jitter);
+          p.fleeDir = { x:(dx/d)*cos-(dz/d)*sin, z:(dx/d)*sin+(dz/d)*cos };
+          p.state = 'fleeing';
+          p.timer = 3+Math.random()*3;
+        }
+      }
+
+      if(p.state==='fleeing'){
+        p.timer -= dt;
+        p.group.position.x += p.fleeDir.x*5*dt;
+        p.group.position.z += p.fleeDir.z*5*dt;
+        p.group.rotation.y = Math.atan2(p.fleeDir.x,p.fleeDir.z);
+        if(p.timer<=0){ p.state='shaken'; p.timer=2+Math.random()*2; }
+        return;
+      }
+      if(p.state==='shaken'){
+        p.timer -= dt;
+        // Nervous glance side to side instead of standing frozen.
+        p.group.rotation.y += Math.sin(p.timer*4)*dt*2;
+        if(p.timer<=0){ p.state = p.role==='peaton' ? 'walking' : 'idle'; }
+        return;
+      }
+
+      // Normal behavior: only 'peaton' actually wanders.
+      if(p.role!=='peaton'){ p.state='idle'; return; }
+      p.state = 'walking';
       const dx=p.waypoint.x-p.group.position.x, dz=p.waypoint.z-p.group.position.z;
       const d=Math.hypot(dx,dz);
       if(d<1){
         const ang=Math.random()*Math.PI*2, rad=Math.random()*p.radius;
         p.waypoint={x:p.center.x+Math.cos(ang)*rad, z:p.center.z+Math.sin(ang)*rad};
       } else {
-        p.group.position.x += dx/d*p.speed*dt;
-        p.group.position.z += dz/d*p.speed*dt;
+        p.group.position.x += dx/d*p.baseSpeed*dt;
+        p.group.position.z += dz/d*p.baseSpeed*dt;
         p.group.rotation.y = Math.atan2(dx,dz);
       }
     });
   });
+}
+/* Nearest talkable civilian within range — mirrors findNearbyRecruit's shape
+   so it slots into the same updateInteractionHint/tryInteract priority chain. */
+const TALK_RADIUS = 2.6;
+function findNearbyCivilian(){
+  const pp = G.player.group.position;
+  let found=null, foundD=TALK_RADIUS;
+  G.barrios.forEach(barrio=>{
+    if(!barrio.detailBuilt) return;
+    barrio.pedestrians.forEach(p=>{
+      if(p.state==='fleeing' || p.state==='shaken' || p.talkCooldown>0) return;
+      const d = Math.hypot(pp.x-p.group.position.x, pp.z-p.group.position.z);
+      if(d<foundD){ foundD=d; found={civ:p, barrio}; }
+    });
+  });
+  return found;
+}
+function talkToCivilian(entry){
+  const p = entry.civ;
+  p.talkCooldown = 20; // doesn't repeat the same line for a while
+  const tier = entry.barrio.owned ? 'owned' : 'neutral';
+  const lines = CIVIL_DIALOGUES[p.role][tier];
+  const line = lines[Math.floor(Math.random()*lines.length)];
+  showDialogueLine(CIVIL_ROLE_NAMES[p.role], line);
 }
 
 /* Picks positions/types/footprints for every conquerable building in a
@@ -3378,6 +3497,7 @@ function updateInteractionHint(){
   G.nearBuildingDoor = null;
   G.nearRecruit = null;
   G.nearStash = null;
+  G.nearCivilian = null;
   if(G.interior.active){
     const et = G.interior.exitTrigger;
     if(et && Math.hypot(pp.x-et.x, pp.z-et.z) < 3){
@@ -3410,6 +3530,13 @@ function updateInteractionHint(){
   if(stash){
     G.nearStash = stash;
     hint.textContent = key+' para revisar el alijo 💰';
+    hint.classList.add('show');
+    return;
+  }
+  const civilian = findNearbyCivilian();
+  if(civilian){
+    G.nearCivilian = civilian;
+    hint.textContent = key+' para hablar 💬';
     hint.classList.add('show');
     return;
   }
@@ -3459,6 +3586,7 @@ function tryInteract(){
   }
   if(G.nearRecruit){ recruitFriend(G.nearRecruit); return; }
   if(G.nearStash){ collectStash(G.nearStash); return; }
+  if(G.nearCivilian){ talkToCivilian(G.nearCivilian); return; }
   if(G.nearBuildingDoor){ enterBuilding(G.nearBuildingDoor); return; }
   if(G.nearTransitPoint) openCityMap();
 }
@@ -4511,6 +4639,18 @@ function showBanner(text){
   b.classList.add('show');
   clearTimeout(bannerTimeout);
   bannerTimeout = setTimeout(()=>b.classList.remove('show'), 3200);
+}
+
+// Civilian dialogue — same show/auto-hide pattern as showBanner, but its own
+// element/style since #banner is styled as an all-caps status announcement,
+// not a conversational quote (see findNearbyCivilian/talkToCivilian).
+let dialogueTimeout=null;
+function showDialogueLine(name, line){
+  const b=document.getElementById('dialogueBox');
+  b.innerHTML = '<b>'+name+':</b> "'+line+'"';
+  b.classList.add('show');
+  clearTimeout(dialogueTimeout);
+  dialogueTimeout = setTimeout(()=>b.classList.remove('show'), 4000);
 }
 
 function rankFor(power){
