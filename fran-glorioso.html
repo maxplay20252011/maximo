@@ -1571,6 +1571,26 @@ function makeTrafficLight(){
   });
   return g;
 }
+/* Pedestrian crossing — a row of white stripe planes, paired with the
+   traffic lights at each plaza corner (ported from the pasted city-generator
+   doc's "cebra" technique; adapted to a single mesh via canvas texture
+   instead of per-stripe geometry, matching how the rest of this file already
+   handles repeating road markings — see makeAvenueTexture). */
+function makeCrosswalk(width){
+  const c = document.createElement('canvas');
+  c.width=64; c.height=256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle='#3a3a3e'; ctx.fillRect(0,0,64,256);
+  ctx.fillStyle='#e8e5da';
+  for(let y=6;y<256;y+=32){ ctx.fillRect(4,y,56,20); }
+  const tex = new THREE.CanvasTexture(c);
+  // makeFlatPlaneGeometry bakes the lie-flat rotation into the GEOMETRY (not
+  // mesh.rotation.x), so the returned mesh's .rotation.y alone can still be
+  // used to point it any compass direction — same trick buildAvenues() uses.
+  const mesh = new THREE.Mesh(makeFlatPlaneGeometry(width,4.5), new THREE.MeshStandardMaterial({map:tex, roughness:.9}));
+  mesh.position.y = 0.014; // just above the ground plane, well clear of avenue markings (0.018) to avoid z-fighting
+  return mesh;
+}
 function makeStreetSign(text){
   const g = new THREE.Group();
   const post = new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,2.4,6), new THREE.MeshStandardMaterial({color:0x3a3a3e}));
@@ -2164,6 +2184,10 @@ function buildBarrioDetail(barrio){
     tl.position.set(barrio.x+Math.cos(a)*(plazaR+4), 0, barrio.z+Math.sin(a)*(plazaR+4));
     tl.rotation.y = a;
     barrio.detailGroup.add(tl);
+    const cross = makeCrosswalk(plazaR*0.9);
+    cross.position.set(barrio.x+Math.cos(a)*(plazaR+7.5), 0, barrio.z+Math.sin(a)*(plazaR+7.5));
+    cross.rotation.y = a+Math.PI/2;
+    barrio.detailGroup.add(cross);
   });
   for(let d=plazaR+12; d<half; d+=18){
     [[d,0],[-d,0],[0,d],[0,-d]].forEach(([ox,oz])=>{
