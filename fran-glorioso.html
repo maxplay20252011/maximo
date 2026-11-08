@@ -263,6 +263,11 @@ body.touch-mode.portrait #portraitHint{display:flex;}
 #hint{position:absolute;bottom:96px;left:50%;transform:translateX(-50%);color:var(--ink);font-size:.85rem;letter-spacing:.02em;
   background:rgba(12,13,18,.78);border:1px solid var(--hud-line);padding:7px 16px;border-radius:999px;opacity:0;transition:opacity .3s;text-align:center;max-width:90vw;}
 #hint.show{opacity:1;}
+body.touch-mode #hint.show{pointer-events:auto;cursor:pointer;background:linear-gradient(180deg,rgba(255,215,0,.95),rgba(214,165,20,.95));color:#231800;
+  border-color:rgba(255,255,255,.6);font-weight:700;font-size:.95rem;padding:9px 20px;box-shadow:0 6px 18px rgba(0,0,0,.45);animation:hintPulse 1.3s ease-in-out infinite;}
+@keyframes hintPulse{0%,100%{transform:translateX(-50%) scale(1);}50%{transform:translateX(-50%) scale(1.05);}}
+#interactBtn.ready{background:linear-gradient(180deg,#ffe27a,var(--gold));color:#231800;border-color:#fff;box-shadow:0 0 0 4px rgba(255,215,0,.35),0 4px 16px rgba(0,0,0,.4);animation:readyPulse 1s ease-in-out infinite;}
+@keyframes readyPulse{0%,100%{box-shadow:0 0 0 3px rgba(255,215,0,.35),0 4px 16px rgba(0,0,0,.4);}50%{box-shadow:0 0 0 10px rgba(255,215,0,0),0 4px 16px rgba(0,0,0,.4);}}
 
 #dialogueBox{position:absolute;bottom:150px;left:50%;transform:translateX(-50%);color:var(--ink);font-size:.92rem;
   background:rgba(12,13,18,.88);border:1px solid var(--hud-line);border-left:3px solid var(--gold);padding:10px 20px;border-radius:8px;
@@ -533,13 +538,13 @@ const RANKS = [
 // minimap and the city fast-travel map. Districts got ~2.6x bigger (see
 // BARRIO_DEFS below), so this grew to match — everything derives from these
 // two numbers, nothing about map scale is hardcoded elsewhere.
-const MAP_HALF = 1300;
+const MAP_HALF = 2000;
 // How far the player must be from a barrio's building/prop content before it
 // gets torn down again, vs. how close before it gets (re)built — see
 // updateWorldStreaming(). The gap between the two avoids rebuilding/tearing
 // down every frame when standing right on the boundary ("hysteresis").
-const STREAM_LOAD_RADIUS = 390;
-const STREAM_UNLOAD_RADIUS = 600;
+const STREAM_LOAD_RADIUS = 300;    // distance from the player to the district's EDGE (not its center) at which it streams in
+const STREAM_UNLOAD_RADIUS = 480;
 
 // `layout` picks which per-district "identity" buildBarrioDetail() uses
 // (building palette/heights/park style) — see DISTRICT_IDENTITY below.
@@ -547,12 +552,12 @@ const STREAM_UNLOAD_RADIUS = 600;
 // every district gets a metro entrance ("la red de subte conecta toda la
 // ciudad") and a bus stop, home additionally gets the taxi stand hub.
 const BARRIO_DEFS = [
-  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:190, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null,   layout:'plaza',          transit:['metro','bus','taxi']},
-  {id:'norte',   name:'Barrio Norte',    x:0,    z:-480, size:220, color:0x3d8bff, home:false, owned:false, thugs:8, boss:'mini',  layout:'residencialAlto',transit:['metro','bus']},
-  {id:'sur',     name:'Barrio Sur',      x:0,    z:480,  size:220, color:0x3ddc84, home:false, owned:false, thugs:8, boss:'mini',  layout:'industrial',     transit:['metro','bus']},
-  {id:'este',    name:'Barrio Este',     x:480,  z:0,    size:220, color:0xff8c3d, home:false, owned:false, thugs:8, boss:'mini',  layout:'comercial',      transit:['metro','bus']},
-  {id:'oeste',   name:'Barrio Oeste',    x:-480, z:0,    size:220, color:0xd63dff, home:false, owned:false, thugs:8, boss:'mini',  layout:'residencialMedio',transit:['metro','bus']},
-  {id:'central', name:'Barrio Central',  x:0,    z:-1030, size:260, color:0xe63946, home:false, owned:false, thugs:10, boss:'final', layout:'financiero',     transit:['metro','bus']}
+  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:320, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null,   layout:'plaza',          transit:['metro','bus','taxi']},
+  {id:'norte',   name:'Barrio Norte',    x:0,    z:-700, size:440, color:0x3d8bff, home:false, owned:false, thugs:8, boss:'mini',  layout:'residencialAlto',transit:['metro','bus']},
+  {id:'sur',     name:'Barrio Sur',      x:0,    z:700,  size:440, color:0x3ddc84, home:false, owned:false, thugs:8, boss:'mini',  layout:'industrial',     transit:['metro','bus']},
+  {id:'este',    name:'Barrio Este',     x:700,  z:0,    size:440, color:0xff8c3d, home:false, owned:false, thugs:8, boss:'mini',  layout:'comercial',      transit:['metro','bus']},
+  {id:'oeste',   name:'Barrio Oeste',    x:-700, z:0,    size:440, color:0xd63dff, home:false, owned:false, thugs:8, boss:'mini',  layout:'residencialMedio',transit:['metro','bus']},
+  {id:'central', name:'Barrio Central',  x:0,    z:-1450, size:520, color:0xe63946, home:false, owned:false, thugs:10, boss:'final', layout:'financiero',     transit:['metro','bus']}
 ];
 
 // 1. "Fran Glorioso comienza con un palo de madera" — palo is the only
@@ -807,6 +812,7 @@ function initScene(){
     barrio.buildingAABBs = [];      // this barrio's own building footprints (collision)
     barrio.buildingMeshes = [];     // this barrio's own building meshes (camera-collision raycast)
     barrio.transitPoints = [];      // this barrio's metro/bus/taxi station world positions
+    barrio.traffic = [];
     barrio.pedestrians = [];        // cosmetic wandering NPCs — see spawnPedestrians()/updatePedestrians()
     barrio.slowZones = [];          // pool circles etc — see updatePlayer's slow-zone check, rebuilt each stream-in
     barrio.barrels = [];            // explosive fire barrels — see performAttack's barrel hit-check, rebuilt each stream-in
@@ -819,10 +825,17 @@ function initScene(){
     barrio.detailGroup = new THREE.Group();
     G.scene.add(barrio.detailGroup);
 
-    const zoneGeo = new THREE.PlaneGeometry(barrio.size, barrio.size);
-    const zoneMat = new THREE.MeshBasicMaterial({color: barrio.owned?0xffd700:barrio.color, transparent:true, opacity:.4, depthWrite:false});
+    // Territory marker: just a colored border line around the district (the
+    // streets inside stay neutral asphalt/concrete).
+    const hs = barrio.size/2, frame = new THREE.Shape();
+    frame.moveTo(-hs,-hs); frame.lineTo(hs,-hs); frame.lineTo(hs,hs); frame.lineTo(-hs,hs); frame.lineTo(-hs,-hs);
+    const hole = new THREE.Path(); const hi = hs-1.6;
+    hole.moveTo(-hi,-hi); hole.lineTo(-hi,hi); hole.lineTo(hi,hi); hole.lineTo(hi,-hi); hole.lineTo(-hi,-hi);
+    frame.holes.push(hole);
+    const zoneGeo = new THREE.ShapeGeometry(frame);
+    const zoneMat = new THREE.MeshBasicMaterial({color: barrio.owned?0xffd700:barrio.color, transparent:true, opacity:.8, depthWrite:false});
     const zone = new THREE.Mesh(zoneGeo, zoneMat);
-    zone.rotation.x=-Math.PI/2; zone.position.set(barrio.x,0.03,barrio.z);
+    zone.rotation.x=-Math.PI/2; zone.position.set(barrio.x,0.16,barrio.z);
     G.scene.add(zone);
     barrio.zoneMesh = zone;
 
@@ -1156,6 +1169,15 @@ function spawnTypedEnemy(barrio, x, z, typeKey, baseStats, extra){
    longer roam out here — they wait inside their "Edificio Final" (see
    BOSS_LAIR_DEFS / spawnInteriorEnemies), so domination now genuinely
    requires finding and clearing that building, not just the street. */
+// Moves a point onto the nearest street of the district's grid, so gang
+// members start out on the road instead of inside somebody's house.
+function snapToStreet(barrio, x, z, rand){
+  const g = districtGrid(barrio);
+  let rx = x-barrio.x, rz = z-barrio.z, ox = rx, oz = rz, bx = 1e9, bz = 1e9;
+  g.offs.forEach(o=>{ if(Math.abs(rx-o)<bx){ bx=Math.abs(rx-o); ox=o; } if(Math.abs(rz-o)<bz){ bz=Math.abs(rz-o); oz=o; } });
+  if(bx<bz) rx = ox + (rand()-.5)*6; else rz = oz + (rand()-.5)*6;
+  return { x: barrio.x+rx, z: barrio.z+rz };
+}
 function spawnBarrioEnemies(barrio){
   const pool = DISTRICT_ENEMY_POOL[barrio.layout];
   if(!pool) return; // home district: no gang, nothing to spawn
@@ -1189,7 +1211,8 @@ function spawnBarrioEnemies(barrio){
       const r = ringR*(0.8+rand()*0.4);
       const ex = barrio.x + Math.cos(ang)*r;
       const ez = barrio.z + Math.sin(ang)*r;
-      spawnTypedEnemy(barrio, ex, ez, typeKey, baseStats);
+      const sp = snapToStreet(barrio, ex, ez, rand);
+      spawnTypedEnemy(barrio, sp.x, sp.z, typeKey, baseStats);
       spawned++;
     }
     slot++;
@@ -1676,11 +1699,13 @@ function makeAvenueTexture(){
   const c = document.createElement('canvas');
   c.width=64; c.height=128;
   const ctx = c.getContext('2d');
-  ctx.fillStyle='#333138'; ctx.fillRect(0,0,64,128);
-  ctx.fillStyle='#48454e'; ctx.fillRect(0,0,7,128); ctx.fillRect(57,0,7,128); // sidewalks
-  ctx.fillStyle='#e8c94a';
-  for(let y=6;y<128;y+=26){ ctx.fillRect(29,y,6,15); } // dashed centerline
-  return new THREE.CanvasTexture(c);
+  ctx.fillStyle='#35353a'; ctx.fillRect(0,0,64,128);
+  for(let i=0;i<260;i++){ const v=44+Math.random()*26|0; ctx.fillStyle='rgb('+v+','+v+','+(v+4)+')'; ctx.fillRect(Math.random()*64,Math.random()*128,2,2); }
+  ctx.fillStyle='#8c8a85'; ctx.fillRect(0,0,6,128); ctx.fillRect(58,0,6,128); // sidewalks
+  ctx.fillStyle='#6d6b67'; ctx.fillRect(6,0,1,128); ctx.fillRect(57,0,1,128); // curbs
+  ctx.fillStyle='#e9e6d8';
+  for(let y=6;y<128;y+=26){ ctx.fillRect(30,y,4,15); } // dashed centerline
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
 /* Wide avenues linking every district back to the home hub (and the final
@@ -1797,23 +1822,6 @@ function makeStreetSign(text){
 /* A parked, non-driveable decorative car — color varies per district (see
    DISTRICT_IDENTITY.carPalette) so a street doesn't look like a car
    dealership of one single tint. */
-function makeParkedCar(bodyColor){
-  const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({color:bodyColor, roughness:.35, metalness:.5});
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.7,.55,3.8), paint);
-  body.position.y=.5; body.castShadow=true; g.add(body);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.45,.5,2.0), paint);
-  cabin.position.set(0,.98,-.1); cabin.castShadow=true; g.add(cabin);
-  const glassMat = new THREE.MeshStandardMaterial({color:0x1c2830, roughness:.2, metalness:.4});
-  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.35,.32,1.85), glassMat);
-  glass.position.set(0,1.12,-.1); g.add(glass);
-  const wheelMat = new THREE.MeshStandardMaterial({color:0x0e0e0e});
-  [[-.82,.3,1.25],[.82,.3,1.25],[-.82,.3,-1.25],[.82,.3,-1.25]].forEach(([x,y,z])=>{
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.3,.3,.22,10), wheelMat);
-    wheel.rotation.x=Math.PI/2; wheel.position.set(x,y,z); g.add(wheel);
-  });
-  return g;
-}
 function makeFountain(){
   const g = new THREE.Group();
   const basin = new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.4,.5,20), new THREE.MeshStandardMaterial({color:0xbfc4c8, roughness:.6}));
@@ -2285,7 +2293,7 @@ function makeTaxiStand(){
    gameplay difference in an arcade game like this. */
 function buildTransitStations(){
   G.barrios.forEach(barrio=>{
-    const plazaR = barrio.size*0.15;
+    const plazaR = barrioPlazaR(barrio);
     barrio.transit.forEach((kind,i)=>{
       const angle = (i/barrio.transit.length)*Math.PI*2 + 0.6;
       const x = barrio.x + Math.cos(angle)*(plazaR+7);
@@ -2308,7 +2316,7 @@ function addParkZone(barrio, cx, cz, r, rand, identity){
   const grass = new THREE.Mesh(new THREE.CircleGeometry(r,20), new THREE.MeshStandardMaterial({color:0x3a6b3a, roughness:1}));
   grass.rotation.x=-Math.PI/2; grass.position.set(cx,0.02,cz);
   barrio.detailGroup.add(grass);
-  const treeCount = Math.round((6+Math.floor(rand()*5))*density);
+  const treeCount = Math.round((6+Math.floor(rand()*5))*density*Math.max(1,r/11));
   for(let i=0;i<treeCount;i++){
     const a=rand()*Math.PI*2, dist=rand()*r*0.85;
     const tree = makeTree();
@@ -2342,163 +2350,663 @@ function addParkZone(barrio, cx, cz, r, rand, identity){
    solid wall of buildings — this is also where "más espacio entre
    construcciones" comes from. Layout is seeded per-barrio-id so it stays
    identical every time streaming rebuilds it. */
-/* ---------- Internal street grid ----------
-   Every district gets a cross of main streets through its plaza (matching the
-   inter-district avenues) plus a parallel secondary street on each side, so
-   the bigger districts read as city blocks instead of a field of boxes.
-   Buildings keep clear of them (see onDistrictStreet). */
-const DISTRICT_STREET_W = 11;
-function districtStreetOffsets(half){ const o = Math.round(half*0.55); return [0, -o, o]; }
+/* ============================================================
+   CITY TOOLKIT — merged-geometry vehicles, facade shader, road grid
+   ============================================================
+   Everything per-district that is numerous (lots/houses, trees, lamps,
+   parked cars, lane markings, crosswalks) is drawn with InstancedMesh or
+   merged geometry, so a whole city block costs a handful of draw calls. */
+function mergeGeoms(parts){
+  let vc=0, ic=0;
+  parts.forEach(p=>{ const g=p.geo; vc+=g.attributes.position.count; ic+=g.index?g.index.count:g.attributes.position.count; });
+  const pos=new Float32Array(vc*3), nor=new Float32Array(vc*3), col=new Float32Array(vc*3), idx=new Uint32Array(ic);
+  let vo=0, io=0; const c=new THREE.Color();
+  parts.forEach(p=>{
+    const g=p.geo, n=g.attributes.position.count;
+    pos.set(g.attributes.position.array, vo*3); nor.set(g.attributes.normal.array, vo*3);
+    c.set(p.color!==undefined?p.color:0xffffff);
+    for(let i=0;i<n;i++){ col[(vo+i)*3]=c.r; col[(vo+i)*3+1]=c.g; col[(vo+i)*3+2]=c.b; }
+    if(g.index){ const a=g.index.array; for(let i=0;i<a.length;i++) idx[io+i]=a[i]+vo; io+=a.length; }
+    else { for(let i=0;i<n;i++) idx[io+i]=vo+i; io+=n; }
+    vo+=n;
+  });
+  const out=new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor,3));
+  out.setAttribute('color', new THREE.BufferAttribute(col,3));
+  out.setIndex(new THREE.BufferAttribute(idx,1));
+  return out;
+}
+function gBox(w,h,d,x,y,z,color){ const g=new THREE.BoxGeometry(w,h,d); g.translate(x,y,z); return {geo:g,color}; }
+function gCylX(r,len,seg,x,y,z,color){ const g=new THREE.CylinderGeometry(r,r,len,seg); g.rotateZ(Math.PI/2); g.translate(x,y,z); return {geo:g,color}; }
+function gCylZ(r,len,seg,x,y,z,color){ const g=new THREE.CylinderGeometry(r,r,len,seg); g.rotateX(Math.PI/2); g.translate(x,y,z); return {geo:g,color}; }
+// Side profile polygon [[z,y],...] extruded across the car's width, front = +Z.
+function gProfile(pts, width, color){
+  const sh=new THREE.Shape(); pts.forEach((q,i)=>{ if(i) sh.lineTo(q[0],q[1]); else sh.moveTo(q[0],q[1]); });
+  const g=new THREE.ExtrudeGeometry(sh,{depth:width,bevelEnabled:false});
+  g.translate(0,0,-width/2); g.rotateY(-Math.PI/2);
+  return {geo:g,color};
+}
+// Thin slab following the segment p0->p1 (in [z,y]) pushed `off` outward.
+function gSlab(width,p0,p1,off,color){
+  const dz=p1[0]-p0[0], dy=p1[1]-p0[1], len=Math.hypot(dz,dy);
+  const g=new THREE.BoxGeometry(width,len,0.03); const phi=Math.atan2(dz,dy); g.rotateX(phi);
+  g.translate(0,(p0[1]+p1[1])/2-Math.sin(phi)*off,(p0[0]+p1[0])/2+Math.cos(phi)*off);
+  return {geo:g,color};
+}
+
+const CAR_KINDS = {
+  sedan:  { L:4.4, W:1.8, wr:.34, wz:[1.38,-1.32],
+    pts:[[-2.2,.32],[2.2,.32],[2.22,.72],[1.55,.84],[.95,.9],[.55,1.4],[-.75,1.42],[-1.4,.92],[-2.15,.88],[-2.22,.6]],
+    side:[[.86,.97],[.58,1.34],[-.7,1.36],[-1.3,.97]], ws:[[.97,.92],[.57,1.38]], rg:[[-.77,1.40],[-1.42,.94]], pillar:-.1, top:1.42 },
+  hatch:  { L:3.9, W:1.74, wr:.33, wz:[1.2,-1.15],
+    pts:[[-1.95,.32],[1.95,.32],[1.97,.72],[1.4,.84],[.85,.9],[.5,1.45],[-1.3,1.47],[-1.92,1.0],[-1.97,.6]],
+    side:[[.78,.97],[.53,1.4],[-1.25,1.42],[-1.7,1.02]], ws:[[.88,.93],[.52,1.43]], rg:[[-1.32,1.45],[-1.9,1.02]], pillar:-.2, top:1.47 },
+  suv:    { L:4.5, W:1.9, wr:.39, wz:[1.42,-1.4],
+    pts:[[-2.25,.42],[2.25,.42],[2.28,.98],[1.7,1.1],[1.1,1.16],[.75,1.78],[-1.95,1.8],[-2.28,1.5],[-2.28,.7]],
+    side:[[1.0,1.22],[.78,1.72],[-1.9,1.74],[-2.18,1.3]], ws:[[1.05,1.18],[.74,1.76]], rg:[[-1.98,1.78],[-2.26,1.5]], pillar:-.4, top:1.8 },
+  pickup: { L:5.0, W:1.95, wr:.4, wz:[1.6,-1.55],
+    pts:[[-2.5,.45],[2.5,.45],[2.52,1.0],[1.9,1.1],[1.2,1.15],[.85,1.72],[-.2,1.74],[-.45,1.2],[-2.5,1.18]],
+    side:[[1.15,1.22],[.88,1.66],[-.18,1.68],[-.38,1.24]], ws:[[1.2,1.17],[.84,1.7]], rg:null, pillar:.35, top:1.74, bed:true },
+  van:    { L:4.9, W:1.95, wr:.36, wz:[1.55,-1.5],
+    pts:[[-2.45,.4],[2.45,.4],[2.47,1.0],[2.05,1.15],[1.55,1.22],[1.15,2.0],[-2.4,2.05],[-2.45,1.8],[-2.45,.7]],
+    side:[[1.5,1.3],[1.2,1.92],[.2,1.92],[.2,1.3]], ws:[[1.58,1.24],[1.14,1.96]], rg:null, pillar:.2, top:2.05 },
+};
+const CAR_KIND_BAG = ['sedan','sedan','sedan','sedan','hatch','hatch','hatch','suv','suv','pickup','van'];
+const CAR_COLORS = [0xd9d9dc,0xb8b8bd,0x1b1c20,0x2c3f6b,0x8a1c24,0x2f5d3a,0x6b6f78,0xe8e2d0,0x9b3d1f,0x1d4f7a,0xcfc27a,0x44464c];
+const _carGeo = {};
+function carGeometry(kind){
+  if(_carGeo[kind]) return _carGeo[kind];
+  const K = CAR_KINDS[kind], W=K.W, L=K.L, H=K.top;
+  const paint = [ gProfile(K.pts, W, 0xffffff) ];
+  paint.push(gBox(W+.06,.12,.5, 0,.5,K.wz[0],0xffffff)); // fender flare hides wheel-top gaps
+  paint.push(gBox(W+.06,.12,.5, 0,.5,K.wz[1],0xffffff));
+  const glass = [ gProfile(K.side, W+.03, 0x101820), gSlab(W-.2, K.ws[0], K.ws[1], .012, 0x101820) ];
+  if(K.rg) glass.push(gSlab(W-.2, K.rg[0], K.rg[1], .012, 0x101820));
+  paint.push(gBox(W+.06, K.top-K.side[1][1]+.0, .09, 0, (K.top+K.side[1][1])/2-.02, K.pillar, 0xffffff)); // B pillar
+  const trim = [];
+  const wx = W/2-.07;
+  [[1,K.wz[0]],[-1,K.wz[0]],[1,K.wz[1]],[-1,K.wz[1]]].forEach(([sx,z])=>{
+    trim.push(gCylX(K.wr,.26,14,sx*wx,K.wr,z,0x141414));
+    trim.push(gCylX(K.wr*.6,.28,10,sx*(wx+.01),K.wr,z,0xb9bec5));
+  });
+  trim.push(gBox(W-.1,.12,L-.2, 0,.3,0,0x0e0e10));
+  trim.push(gBox(W+.04,.2,.14, 0,.42,L/2+.02,0x1d1d20));
+  trim.push(gBox(W+.04,.2,.14, 0,.42,-L/2-.02,0x1d1d20));
+  [-1,1].forEach(sx=>{
+    trim.push(gBox(.38,.14,.07, sx*(W/2-.3),.68,L/2+.03,0xfff6d0));
+    trim.push(gBox(.34,.12,.06, sx*(W/2-.27),.7,-L/2-.03,0xc41818));
+    trim.push(gBox(.12,.1,.22, sx*(W/2+.09),K.side[0][1]-.02,K.ws[0][0]-.05,0x1a1a1a)); // mirrors
+  });
+  trim.push(gBox(.8,.15,.07, 0,.62,L/2+.03,0x0e0e10));
+  trim.push(gBox(.5,.13,.04, 0,.56,-L/2-.05,0xe8e8e8));
+  if(K.bed) trim.push(gBox(W-.3,.05,2.0, 0,K.pts[8][1]+.01,-1.5,0x18181a));
+  return _carGeo[kind] = { paint:mergeGeoms(paint), glass:mergeGeoms(glass), trim:mergeGeoms(trim), K };
+}
+const _paintMats = {};
+function carPaintMaterial(color){ return _paintMats[color] || (_paintMats[color] = new THREE.MeshStandardMaterial({color, roughness:.32, metalness:.55})); }
+let _carGlassMat=null, _carTrimMat=null, _carWhiteMat=null;
+function carSharedMaterials(){
+  if(!_carGlassMat){
+    _carGlassMat = new THREE.MeshStandardMaterial({vertexColors:true, roughness:.08, metalness:.85});
+    _carTrimMat = new THREE.MeshStandardMaterial({vertexColors:true, roughness:.7, metalness:.15});
+    _carWhiteMat = new THREE.MeshStandardMaterial({color:0xffffff, roughness:.32, metalness:.55});
+  }
+}
+function makeCar(kind, color, taxi){
+  carSharedMaterials();
+  const G3 = carGeometry(kind), g = new THREE.Group();
+  const paint = new THREE.Mesh(G3.paint, carPaintMaterial(taxi?0xe8b923:color)); paint.castShadow=true; g.add(paint);
+  g.add(new THREE.Mesh(G3.glass, _carGlassMat));
+  g.add(new THREE.Mesh(G3.trim, _carTrimMat));
+  if(taxi){ const sign=new THREE.Mesh(new THREE.BoxGeometry(.55,.2,.24), new THREE.MeshStandardMaterial({color:0xfff2b0, emissive:0xffd54a, emissiveIntensity:.7})); sign.position.set(0,G3.K.top+.12,0); g.add(sign); }
+  g.userData.kind = kind;
+  return g;
+}
+function makeParkedCar(bodyColor){ return makeCar(CAR_KIND_BAG[Math.floor(Math.random()*CAR_KIND_BAG.length)], bodyColor); }
+
+let _motoGeo = null;
+function motoGeometry(){
+  if(_motoGeo) return _motoGeo;
+  const paint=[], trim=[];
+  const tank = new THREE.SphereGeometry(.28,12,8); tank.scale(.95,.82,1.55); tank.translate(0,.98,.28); paint.push({geo:tank,color:0xffffff});
+  paint.push(gBox(.3,.2,.55, 0,.96,-.5,0xffffff));
+  const fair = new THREE.BoxGeometry(.34,.34,.22); fair.rotateX(-.35); fair.translate(0,1.02,.72); paint.push({geo:fair,color:0xffffff});
+  paint.push(gBox(.32,.05,.7, 0,.62,.95,0xffffff)); // front fender
+  [[.78],[-.78]].forEach(([z])=>{
+    const t=new THREE.TorusGeometry(.33,.1,8,18); t.rotateY(Math.PI/2); t.translate(0,.43,z); trim.push({geo:t,color:0x141414});
+    trim.push(gCylX(.22,.07,10,0,.43,z,0xb9bec5));
+  });
+  [-1,1].forEach(sx=>{
+    const f=new THREE.CylinderGeometry(.035,.035,.8,6); f.rotateX(-.3); f.translate(sx*.1,.78,.86); trim.push({geo:f,color:0xc9ced4});
+  });
+  trim.push(gCylX(.03,.72,6,0,1.2,.7,0x1a1a1a));
+  [-1,1].forEach(sx=>{ trim.push(gBox(.04,.12,.03,sx*.4,1.3,.68,0x222222)); trim.push(gBox(.09,.07,.02,sx*.4,1.37,.66,0x6a7a88)); });
+  trim.push(gBox(.32,.34,.55, 0,.52,.02,0x3a3a3f));
+  trim.push(gBox(.28,.1,.7, 0,.88,-.2,0x161616));
+  trim.push(gCylZ(.05,.95,8,.19,.4,-.32,0xbfc3c8));
+  const hl=new THREE.SphereGeometry(.1,8,8); hl.translate(0,1.0,.9); trim.push({geo:hl,color:0xfff6d0});
+  trim.push(gBox(.16,.08,.04, 0,.92,-.82,0xc41818));
+  trim.push(gBox(.22,.14,.03, 0,.7,-.84,0xe8e8e8));
+  return _motoGeo = { paint:mergeGeoms(paint), trim:mergeGeoms(trim) };
+}
+function makeMotoModel(color){
+  carSharedMaterials();
+  const M = motoGeometry(), g = new THREE.Group();
+  const p = new THREE.Mesh(M.paint, carPaintMaterial(color)); p.castShadow = true; g.add(p);
+  const t = new THREE.Mesh(M.trim, _carTrimMat); t.castShadow = true; g.add(t);
+  return g;
+}
+
+/* ---------- facade shader: procedural windows (lit/unlit, floors) so
+   hundreds of instanced boxes read as real buildings ---------- */
+let _facadeMat = null;
+function facadeMaterial(){
+  if(_facadeMat) return _facadeMat;
+  const m = new THREE.MeshStandardMaterial({color:0xffffff, roughness:.9, metalness:0});
+  m.onBeforeCompile = sh=>{
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>','#include <common>\nvarying vec3 vWP; varying vec3 vWN;')
+      .replace('#include <begin_vertex>','#include <begin_vertex>\nvec4 fwp = modelMatrix * instanceMatrix * vec4(position,1.0); vWP = fwp.xyz; vWN = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>','#include <common>\nvarying vec3 vWP; varying vec3 vWN;\nfloat fh21(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }')
+      .replace('#include <color_fragment>',`#include <color_fragment>
+      float fside = step(abs(vWN.y),0.5);
+      float fu = abs(vWN.x)>0.5 ? vWP.z : vWP.x;
+      vec2 fcell = vec2(fu/3.6, vWP.y/3.3);
+      vec2 fid = floor(fcell); vec2 ff = fract(fcell);
+      float fwin = step(.2,ff.x)*step(ff.x,.8)*step(.3,ff.y)*step(ff.y,.82)*fside*step(1.0,vWP.y);
+      float flit = step(.68, fh21(fid + floor(vWP.xz*.05)*7.3 + step(.5,abs(vWN.x))));
+      vec3 fglass = mix(vec3(.09,.12,.16), vec3(.95,.74,.4), flit);
+      float fsill = (1.-fwin)*fside*step(ff.y,.3)*step(1.0,vWP.y)*.18;
+      diffuseColor.rgb = mix(diffuseColor.rgb*(1.-fsill), fglass, fwin);
+      diffuseColor.rgb *= mix(.7,1.,smoothstep(0.,3.,vWP.y));
+      vec3 fem = fglass*fwin*flit*.5;`)
+      .replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\ntotalEmissiveRadiance += fem;');
+  };
+  m.customProgramCacheKey = ()=>'facade-v1';
+  return _facadeMat = m;
+}
+
+/* ---------- district street grid ---------- */
+const CITY = { roadW:11, walk:3.2 };
+CITY.edge = CITY.roadW/2 + CITY.walk;     // road center -> outer edge of the sidewalk
+CITY.corner = CITY.roadW/2 + CITY.walk/2; // road center -> middle of the sidewalk (where people walk)
+function barrioPlazaR(barrio){ return barrio.id==='central' ? 20 : 16; }
+function districtGrid(barrio){
+  if(barrio._grid) return barrio._grid;
+  const half = barrio.size/2 - 6;
+  const n = Math.max(2, Math.round(half/72));
+  const pitch = half/n;
+  const offs = []; for(let k=-n;k<=n;k++) offs.push(k*pitch);
+  return barrio._grid = { half, n, pitch, offs };
+}
 function onDistrictStreet(barrio, half, x, z, hw, hd){
-  const pad = DISTRICT_STREET_W/2 + 1;
-  const offs = districtStreetOffsets(half);
-  for(let i=0;i<offs.length;i++){
-    if(Math.abs(x-barrio.x-offs[i]) < hw+pad) return true;
-    if(Math.abs(z-barrio.z-offs[i]) < hd+pad) return true;
+  const g = districtGrid(barrio), pad = CITY.edge + 1;
+  for(let i=0;i<g.offs.length;i++){
+    if(Math.abs(x-barrio.x-g.offs[i]) < hw+pad) return true;
+    if(Math.abs(z-barrio.z-g.offs[i]) < hd+pad) return true;
   }
   return false;
 }
-let _streetTexture = null;
-function buildDistrictStreets(barrio, half){
-  if(!_streetTexture){
-    const c = document.createElement('canvas'); c.width=64; c.height=128;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle='#2f2d34'; ctx.fillRect(0,0,64,128);
-    for(let i=0;i<260;i++){ ctx.fillStyle='rgba(255,255,255,'+(Math.random()*.05)+')'; ctx.fillRect(Math.random()*64,Math.random()*128,2,2); }
-    ctx.fillStyle='#4b4852'; ctx.fillRect(0,0,6,128); ctx.fillRect(58,0,6,128);
-    ctx.fillStyle='#6a6672'; ctx.fillRect(6,0,1,128); ctx.fillRect(57,0,1,128);
-    ctx.fillStyle='#e8c94a';
-    for(let y=6;y<128;y+=32) ctx.fillRect(30,y,4,16);
-    _streetTexture = new THREE.CanvasTexture(c);
-    _streetTexture.wrapS = _streetTexture.wrapT = THREE.RepeatWrapping;
-    _streetTexture.colorSpace = THREE.SRGBColorSpace;
-    _streetTexture.anisotropy = 4;
-  }
-  const mat = new THREE.MeshStandardMaterial({map:_streetTexture, roughness:.95});
-  const len = half*2 + 16;
-  const offs = districtStreetOffsets(half);
-  offs.forEach(o=>{
+
+let _roadTex=null, _walkTex=null, _dashTex=null, _zebraTex=null, _concreteTex=null;
+function cityTextures(){
+  if(_roadTex) return;
+  const mk=(w,h,fn)=>{ const c=document.createElement('canvas'); c.width=w; c.height=h; fn(c.getContext('2d'),w,h); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; t.anisotropy=4; return t; };
+  _roadTex = mk(64,64,(x,w,h)=>{ x.fillStyle='#35353a'; x.fillRect(0,0,w,h); for(let i=0;i<420;i++){ const v=40+Math.random()*30|0; x.fillStyle='rgb('+v+','+v+','+(v+4)+')'; x.fillRect(Math.random()*w,Math.random()*h,2,2);} });
+  _walkTex = mk(64,64,(x,w,h)=>{ x.fillStyle='#8c8a85'; x.fillRect(0,0,w,h); x.strokeStyle='rgba(0,0,0,.22)'; x.lineWidth=2; x.strokeRect(0,0,w,h); for(let i=0;i<180;i++){ const v=130+Math.random()*25|0; x.fillStyle='rgb('+v+','+v+','+(v-4)+')'; x.fillRect(Math.random()*w,Math.random()*h,2,2);} });
+  _concreteTex = mk(64,64,(x,w,h)=>{ x.fillStyle='#6f6d69'; x.fillRect(0,0,w,h); for(let i=0;i<300;i++){ const v=95+Math.random()*30|0; x.fillStyle='rgb('+v+','+v+','+(v-3)+')'; x.fillRect(Math.random()*w,Math.random()*h,2,2);} });
+  _dashTex = mk(32,128,(x,w,h)=>{ x.clearRect(0,0,w,h); x.fillStyle='#e9e6d8'; x.fillRect(14,10,4,46); x.fillRect(14,74,4,46); });
+  _zebraTex = mk(128,32,(x,w,h)=>{ x.clearRect(0,0,w,h); x.fillStyle='rgba(235,235,225,.92)'; for(let i=0;i<8;i++) x.fillRect(i*16+3,0,9,h); });
+}
+function polyLayer(mat,n){ mat.polygonOffset=true; mat.polygonOffsetFactor=-n; mat.polygonOffsetUnits=-n; return mat; }
+function flatPlane(w,d,u,v){ const g=new THREE.PlaneGeometry(w,d); g.rotateX(-Math.PI/2); if(u||v){ const uv=g.attributes.uv; for(let i=0;i<uv.count;i++){ uv.setX(i,uv.getX(i)*(u||1)); uv.setY(i,uv.getY(i)*(v||1)); } } return g; }
+function instancedFrom(geo, mat, count){ const m=new THREE.InstancedMesh(geo,mat,count); m.frustumCulled=false; return m; }
+const _dummy = new THREE.Object3D();
+function setInst(mesh,i,x,y,z,sx,sy,sz,ry,color){
+  _dummy.position.set(x,y,z); _dummy.scale.set(sx,sy,sz); _dummy.rotation.set(0,ry||0,0); _dummy.updateMatrix();
+  mesh.setMatrixAt(i,_dummy.matrix); if(color!==undefined) mesh.setColorAt(i,_tmpCol.set(color));
+}
+const _tmpCol = new THREE.Color();
+
+/* Lays out ground, sidewalks, asphalt, lane markings and crosswalks for one
+   district into barrio.detailGroup. */
+function buildDistrictRoads(barrio){
+  cityTextures();
+  const g = districtGrid(barrio), grp = barrio.detailGroup, N = g.offs.length;
+  const len = g.half*2 + 2*CITY.edge;
+  // district ground (the neighborhood "base": concrete between the roads)
+  const gr = flatPlane(barrio.size, barrio.size, barrio.size/14, barrio.size/14);
+  const gm = new THREE.Mesh(gr, polyLayer(new THREE.MeshStandardMaterial({map:_concreteTex, roughness:1}),1));
+  gm.position.set(barrio.x,.02,barrio.z); gm.receiveShadow=true; grp.add(gm);
+  // central plaza paving
+  const pl = new THREE.Mesh(new THREE.CircleGeometry(barrioPlazaR(barrio)+8,40), polyLayer(new THREE.MeshStandardMaterial({map:_walkTex, roughness:.95}),2));
+  pl.rotation.x=-Math.PI/2; pl.position.set(barrio.x,.05,barrio.z); pl.receiveShadow=true; grp.add(pl);
+  _walkTex.repeat.set(1,1);
+  // sidewalks then asphalt (asphalt on top so intersections read cleanly)
+  const swGeo = flatPlane(CITY.roadW+2*CITY.walk, len, 3, len/6), asGeo = flatPlane(CITY.roadW, len, 1.4, len/8);
+  const swMat = polyLayer(new THREE.MeshStandardMaterial({map:_walkTex, roughness:.95}),3), asMat = polyLayer(new THREE.MeshStandardMaterial({map:_roadTex, roughness:.92}),4);
+  g.offs.forEach(o=>{
     for(let dir=0; dir<2; dir++){
-      const geo = makeFlatPlaneGeometry(DISTRICT_STREET_W, len);
-      const uv = geo.attributes.uv; for(let i=0;i<uv.count;i++) uv.setY(i, uv.getY(i)*len/16);
-      const m = new THREE.Mesh(geo, mat);
-      m.receiveShadow = true;
-      if(dir===0){ m.position.set(barrio.x+o, 0.026+(o===0?0:0.001), barrio.z); }
-      else { m.rotation.y = Math.PI/2; m.position.set(barrio.x, 0.027+(o===0?0:0.001), barrio.z+o); }
-      barrio.detailGroup.add(m);
+      const a = new THREE.Mesh(swGeo, swMat), b = new THREE.Mesh(asGeo, asMat);
+      a.receiveShadow = b.receiveShadow = true;
+      if(dir===0){ a.position.set(barrio.x+o,.08,barrio.z); b.position.set(barrio.x+o,.11,barrio.z); }
+      else { a.rotation.y=b.rotation.y=Math.PI/2; a.position.set(barrio.x,.081,barrio.z+o); b.position.set(barrio.x,.111,barrio.z+o); }
+      grp.add(a); grp.add(b);
     }
+  });
+  // lane dashes: one segment per stretch of road between two intersections
+  const segLen = g.pitch - 2*CITY.edge;
+  const dashGeo = flatPlane(1.0, segLen, 1, segLen/8);
+  const dashMat = polyLayer(new THREE.MeshBasicMaterial({map:_dashTex, transparent:true, depthWrite:false}),5);
+  const segs = (N-1)*N*2;
+  const dash = instancedFrom(dashGeo, dashMat, segs); let si=0;
+  for(let a=0;a<N;a++) for(let k=0;k<N-1;k++){
+    const mid = (g.offs[k]+g.offs[k+1])/2;
+    setInst(dash,si++, barrio.x+g.offs[a], .14, barrio.z+mid, 1,1,1, 0);
+    setInst(dash,si++, barrio.x+mid, .14, barrio.z+g.offs[a], 1,1,1, Math.PI/2);
+  }
+  dash.instanceMatrix.needsUpdate = true; grp.add(dash);
+  // zebra crossings on all four sides of every intersection
+  const zGeo = flatPlane(CITY.roadW-1.2, 2.6, 1, 1);
+  const zMat = polyLayer(new THREE.MeshBasicMaterial({map:_zebraTex, transparent:true, depthWrite:false}),6);
+  const zeb = instancedFrom(zGeo, zMat, N*N*4); let zi=0;
+  const c = CITY.corner;
+  for(let i=0;i<N;i++) for(let j=0;j<N;j++){
+    const X=barrio.x+g.offs[i], Z=barrio.z+g.offs[j];
+    [-1,1].forEach(s=>{
+      setInst(zeb,zi++, X, .15, Z+s*c, 1,1,1, 0);          // crosses the north-south road
+      setInst(zeb,zi++, X+s*c, .15, Z, 1,1,1, Math.PI/2);  // crosses the east-west road
+    });
+  }
+  zeb.instanceMatrix.needsUpdate = true; grp.add(zeb);
+}
+
+/* ---------- lots: houses and apartment blocks filling every city block ---------- */
+let _unitBox=null, _unitCone=null, _roofMat=null, _capMat=null;
+const ROOF_COLORS = [0x9a5a44,0xa8664a,0x7d6a5c,0x8a8d92,0x6f7782,0xb0745a,0x5f6b5a,0x9c9890];
+const HOUSE_SHARE = { plaza:.6, residencialAlto:.7, industrial:.45, comercial:.3, residencialMedio:.82, financiero:.08 };
+function buildDistrictLots(barrio, rand, identity, plazaR, park, placed){
+  const g = districtGrid(barrio), N = g.offs.length, grp = barrio.detailGroup;
+  const lots = [];
+  const skip = 0.03 + (identity.emptyLotChance||0)*0.5;
+  const clearR = plazaR + 10;
+  const houseShare = HOUSE_SHARE[barrio.layout] || .6;
+  const downtown = barrio.layout==='financiero' || barrio.layout==='comercial';
+  for(let i=0;i<N-1;i++) for(let j=0;j<N-1;j++){
+    const x0=barrio.x+g.offs[i]+CITY.edge+1.2, x1=barrio.x+g.offs[i+1]-CITY.edge-1.2;
+    const z0=barrio.z+g.offs[j]+CITY.edge+1.2, z1=barrio.z+g.offs[j+1]-CITY.edge-1.2;
+    const bw=x1-x0, bd=z1-z0;
+    const nc=Math.max(1,Math.round(bw/(10.5+rand()*4))), nr=Math.max(1,Math.round(bd/(10.5+rand()*4)));
+    const cw=bw/nc, cd=bd/nr;
+    for(let c=0;c<nc;c++) for(let r=0;r<nr;r++){
+      if(rand()<skip) continue;
+      const cx=x0+(c+.5)*cw, cz=z0+(r+.5)*cd;
+      const w=cw*(.84+rand()*.13), d=cd*(.84+rand()*.13);
+      const rr = Math.max(w,d)*.5;
+      if(Math.hypot(cx-barrio.x,cz-barrio.z) < clearR+rr) continue;
+      if(park && Math.hypot(cx-park.x,cz-park.z) < park.r+rr*.7) continue;
+      let ok=true;
+      for(let k=0;k<placed.length && ok;k++){ const p=placed[k]; if(Math.abs(cx-p.x) < w/2+p.hw+.3 && Math.abs(cz-p.z) < d/2+p.hd+.3) ok=false; }
+      if(!ok) continue;
+      const dist = Math.hypot(cx-barrio.x,cz-barrio.z)/g.half;
+      const house = rand() < houseShare*(downtown ? (dist>.7?1:.2) : 1);
+      let h;
+      if(house) h = 4.4 + rand()*3.4;
+      else { const hr = identity.heightRange; h = hr[0] + Math.pow(rand(),1.35)*(hr[1]-hr[0]); if(downtown) h *= 1+(1-Math.min(1,dist))*.55; h = Math.max(h, 7); }
+      lots.push({x:cx,z:cz,w,d,h,house});
+    }
+  }
+  if(!lots.length) return;
+  const nHouse = lots.filter(l=>l.house).length, nBlock = lots.length-nHouse;
+  if(!_unitBox){
+    _unitBox = new THREE.BoxGeometry(1,1,1);
+    _unitCone = new THREE.ConeGeometry(.7071,1,4,1); _unitCone.rotateY(Math.PI/4);
+    _roofMat = new THREE.MeshStandardMaterial({color:0xffffff, roughness:.85});
+    _capMat = new THREE.MeshStandardMaterial({color:0xffffff, roughness:.9});
+  }
+  const walls = instancedFrom(_unitBox, facadeMaterial(), lots.length);
+  walls.castShadow = true; walls.receiveShadow = true;
+  const roofs = nHouse ? instancedFrom(_unitCone, _roofMat, nHouse) : null;
+  const caps = nBlock ? instancedFrom(_unitBox, _capMat, nBlock*2) : null;
+  if(roofs) roofs.castShadow = true;
+  let ri=0, ci=0;
+  lots.forEach((l,i)=>{
+    const base = identity.wallPalette[Math.floor(rand()*identity.wallPalette.length)];
+    const col = new THREE.Color(base).multiplyScalar(.9+rand()*.2);
+    setInst(walls,i,l.x,l.h/2,l.z,l.w,l.h,l.d,0,col);
+    const roofCol = rand()<.55 ? ROOF_COLORS[Math.floor(rand()*ROOF_COLORS.length)] : identity.roofPalette[Math.floor(rand()*identity.roofPalette.length)];
+    if(l.house){
+      const rh = 1.8+rand()*1.3;
+      setInst(roofs,ri++,l.x,l.h+rh/2,l.z,l.w*1.08,rh,l.d*1.08,0,roofCol);
+    } else {
+      setInst(caps,ci++,l.x,l.h+.3,l.z,l.w*1.02,.6,l.d*1.02,0,shadeColor(roofCol,.1));
+      setInst(caps,ci++,l.x+(rand()-.5)*l.w*.3,l.h+1.2,l.z+(rand()-.5)*l.d*.3,l.w*.28,1.2,l.d*.28,0,0x55575c);
+    }
+    placed.push({x:l.x,z:l.z,hw:l.w/2,hd:l.d/2});
+    barrio.buildingAABBs.push({minX:l.x-l.w/2-.3,maxX:l.x+l.w/2+.3,minZ:l.z-l.d/2-.3,maxZ:l.z+l.d/2+.3});
+  });
+  [walls,roofs,caps].forEach(m=>{ if(!m) return; m.instanceMatrix.needsUpdate=true; if(m.instanceColor) m.instanceColor.needsUpdate=true; grp.add(m); });
+  barrio.buildingMeshes.push(walls);
+}
+
+/* ---------- trees + street lamps along every sidewalk (instanced) ---------- */
+let _treeGeo=null;
+function buildStreetFurniture(barrio, rand, identity){
+  const g = districtGrid(barrio), grp = barrio.detailGroup, offs = g.offs;
+  const nearX = p=>{ for(let k=0;k<offs.length;k++) if(Math.abs(p-offs[k]) < CITY.edge+3) return true; return false; };
+  const trees=[], lamps=[];
+  const treeChance = Math.min(.9, .5*identity.treeDensity);
+  offs.forEach(o=>{
+    for(let axis=0; axis<2; axis++){
+      for(let s=-1;s<=1;s+=2){
+        for(let p=-g.half+10+rand()*6; p<g.half-6; p+=15){
+          if(nearX(p)) continue;
+          if(rand()<treeChance) trees.push({x:axis===0?o+s*(CITY.edge-1.0):p, z:axis===0?p:o+s*(CITY.edge-1.0), sc:.85+rand()*.45, c:rand()});
+        }
+        for(let p=-g.half+18; p<g.half-10; p+=30){
+          if(nearX(p)) continue;
+          lamps.push({x:axis===0?o+s*(CITY.roadW/2+.6):p, z:axis===0?p:o+s*(CITY.roadW/2+.6), ry: axis===0 ? (s>0?Math.PI:0) : s*Math.PI/2});
+        }
+      }
+    }
+  });
+  if(!_treeGeo){
+    const trunk=new THREE.CylinderGeometry(.13,.2,2.4,6); trunk.translate(0,1.2,0);
+    const crown=new THREE.IcosahedronGeometry(1.25,1); crown.scale(1,1.05,1); crown.translate(0,3.5,0);
+    const post=new THREE.CylinderGeometry(.07,.09,6.2,6); post.translate(0,3.1,0);
+    const arm=new THREE.BoxGeometry(1.5,.08,.08); arm.translate(.7,6.1,0);
+    const head=new THREE.BoxGeometry(.55,.12,.28); head.translate(1.35,6.04,0);
+    _treeGeo={trunk,crown,lampPost:mergeGeoms([{geo:post,color:0x2a2a2e},{geo:arm,color:0x2a2a2e}]),head};
+  }
+  if(trees.length){
+    const tm = instancedFrom(_treeGeo.trunk, new THREE.MeshStandardMaterial({color:0x4a3320, roughness:.95}), trees.length);
+    const cm = instancedFrom(_treeGeo.crown, new THREE.MeshStandardMaterial({color:0xffffff, roughness:.9}), trees.length);
+    cm.castShadow = true;
+    const greens=[0x2f6a35,0x3c7a3a,0x28592f,0x4a8a3e];
+    trees.forEach((t,i)=>{ setInst(tm,i,t.x+barrio.x,0,t.z+barrio.z,t.sc,t.sc,t.sc,0); setInst(cm,i,t.x+barrio.x,0,t.z+barrio.z,t.sc,t.sc,t.sc,t.c*6,greens[Math.floor(t.c*greens.length)]); });
+    tm.instanceMatrix.needsUpdate=true; cm.instanceMatrix.needsUpdate=true; cm.instanceColor.needsUpdate=true;
+    grp.add(tm); grp.add(cm);
+  }
+  if(lamps.length){
+    const pm = instancedFrom(_treeGeo.lampPost, new THREE.MeshStandardMaterial({vertexColors:true, roughness:.6, metalness:.4}), lamps.length);
+    const hm = instancedFrom(_treeGeo.head, new THREE.MeshStandardMaterial({color:0xffe9a8, emissive:0xffcf5c, emissiveIntensity:1.1}), lamps.length);
+    lamps.forEach((l,i)=>{ setInst(pm,i,l.x+barrio.x,0,l.z+barrio.z,1,1,1,l.ry); setInst(hm,i,l.x+barrio.x,0,l.z+barrio.z,1,1,1,l.ry); });
+    pm.instanceMatrix.needsUpdate=true; hm.instanceMatrix.needsUpdate=true;
+    grp.add(pm); grp.add(hm);
+  }
+}
+
+/* ---------- parked cars along the curb (one InstancedMesh trio per model) ---------- */
+function buildParkedCars(barrio, rand, identity, placed){
+  carSharedMaterials();
+  const g = districtGrid(barrio), offs = g.offs, grp = barrio.detailGroup;
+  const byKind = {};
+  const nearX = p=>{ for(let k=0;k<offs.length;k++) if(Math.abs(p-offs[k]) < CITY.edge+4.5) return true; return false; };
+  const pal = (identity.carPalette||[]).concat(CAR_COLORS);
+  offs.forEach(o=>{
+    for(let axis=0; axis<2; axis++) for(let s=-1;s<=1;s+=2){
+      for(let p=-g.half+10; p<g.half-8; p+=7.4){
+        if(nearX(p) || rand()>0.085) continue;
+        const kind = CAR_KIND_BAG[Math.floor(rand()*CAR_KIND_BAG.length)];
+        const dir = axis===0 ? -s : s; // right-hand traffic: parked in the lane direction
+        const x = axis===0 ? o+s*4.55 : p, z = axis===0 ? p : o+s*4.55;
+        const ry = axis===0 ? (dir>0?0:Math.PI) : (dir>0?Math.PI/2:-Math.PI/2);
+        (byKind[kind] = byKind[kind]||[]).push({x:barrio.x+x, z:barrio.z+z, ry, axis, color:pal[Math.floor(rand()*pal.length)]});
+      }
+    }
+  });
+  Object.keys(byKind).forEach(kind=>{
+    const list = byKind[kind], G3 = carGeometry(kind);
+    const pm = instancedFrom(G3.paint, _carWhiteMat, list.length); pm.castShadow = true;
+    const gm = instancedFrom(G3.glass, _carGlassMat, list.length), tm = instancedFrom(G3.trim, _carTrimMat, list.length);
+    list.forEach((c,i)=>{
+      setInst(pm,i,c.x,0,c.z,1,1,1,c.ry,c.color); setInst(gm,i,c.x,0,c.z,1,1,1,c.ry); setInst(tm,i,c.x,0,c.z,1,1,1,c.ry);
+      const hl = G3.K.L/2, hw = G3.K.W/2, ex = c.axis===0 ? hw : hl, ez = c.axis===0 ? hl : hw;
+      barrio.buildingAABBs.push({minX:c.x-ex,maxX:c.x+ex,minZ:c.z-ez,maxZ:c.z+ez});
+    });
+    [pm,gm,tm].forEach(m=>{ m.instanceMatrix.needsUpdate=true; if(m.instanceColor) m.instanceColor.needsUpdate=true; grp.add(m); });
   });
 }
 
+/* ---------- traffic: cars and motorbikes driving the street grid ---------- */
+const LANE = 2.5;
+function spawnTraffic(barrio, rand, identity){
+  const g = districtGrid(barrio), offs = g.offs, n = g.n;
+  const roads = []; for(let a=0;a<offs.length;a++) if(a!==n) roads.push(a);
+  const count = Math.round(roads.length*2*1.15*(barrio.layout==='industrial'?.7:1));
+  const pal = (identity.carPalette||[]).concat(CAR_COLORS);
+  for(let i=0;i<count;i++){
+    const ri = roads[Math.floor(rand()*roads.length)], axis = rand()<.5?'z':'x', dir = rand()<.5?1:-1;
+    const isMoto = rand()<.14, taxi = !isMoto && (barrio.layout==='comercial'||barrio.layout==='financiero'||barrio.layout==='plaza') && rand()<.25;
+    const kind = CAR_KIND_BAG[Math.floor(rand()*CAR_KIND_BAG.length)];
+    const group = isMoto ? makeMotoModel(pal[Math.floor(rand()*pal.length)]) : makeCar(kind, pal[Math.floor(rand()*pal.length)], taxi);
+    const p = (rand()*2-1)*g.half;
+    const car = { group, axis, ri, dir, p, speed:0, maxSpeed:5.5+rand()*4.5, hitCd:0, snap:true, moto:isMoto, len:isMoto?1.1:CAR_KINDS[kind].L/2 };
+    trafficTarget(barrio, car, group.position); group.rotation.y = trafficHeading(car);
+    barrio.detailGroup.add(group); barrio.traffic.push(car);
+  }
+}
+function trafficHeading(car){ return car.axis==='z' ? (car.dir>0?0:Math.PI) : (car.dir>0?Math.PI/2:-Math.PI/2); }
+function trafficTarget(barrio, car, out){
+  const o = districtGrid(barrio).offs[car.ri];
+  if(car.axis==='z'){ out.x = barrio.x+o-car.dir*LANE; out.z = barrio.z+car.p; }
+  else { out.z = barrio.z+o+car.dir*LANE; out.x = barrio.x+car.p; }
+  out.y = 0;
+}
+const _tgt = new THREE.Vector3();
+function angDiff(a,b){ let d=b-a; while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI; return d; }
+function updateTraffic(dt){
+  const pp = G.player.group.position;
+  G.barrios.forEach(barrio=>{
+    if(!barrio.detailBuilt || !barrio.traffic.length) return;
+    if(Math.hypot(pp.x-barrio.x,pp.z-barrio.z) > barrio.size/2+280) return;
+    const gr = districtGrid(barrio), offs = gr.offs, n = gr.n;
+    const cars = barrio.traffic, peds = barrio.pedestrians;
+    cars.forEach(car=>{
+      const gp = car.group.position;
+      const fx = car.axis==='z' ? 0 : car.dir, fz = car.axis==='z' ? car.dir : 0;
+      const look = 5.5 + car.speed*1.0 + car.len;
+      const blocked = (ox,oz,lat)=>{ const dx=ox-gp.x, dz=oz-gp.z; const al=dx*fx+dz*fz; return al>car.len*.5 && al<look && Math.abs(dx*fz-dz*fx)<(lat||2.0); };
+      let stop = blocked(pp.x,pp.z,2.0);
+      for(let i=0;i<peds.length && !stop;i++){ const q=peds[i].group.position; stop = blocked(q.x,q.z,1.9); }
+      for(let i=0;i<cars.length && !stop;i++){ if(cars[i]===car) continue; const q=cars[i].group.position; stop = blocked(q.x,q.z,1.7); }
+      const target = stop ? 0 : car.maxSpeed;
+      car.speed += (target-car.speed)*Math.min(1, dt*(target<car.speed?4.5:1.3));
+      const prev = car.p;
+      car.p += car.dir*car.speed*dt;
+      for(let k=0;k<offs.length;k++){
+        if(k===n || k===car.ri) continue;
+        if((prev-offs[k])*(car.p-offs[k]) <= 0 && prev!==car.p){
+          if(Math.random() < .3){
+            const oldO = offs[car.ri];
+            car.axis = car.axis==='z' ? 'x' : 'z'; car.ri = k; car.p = oldO; car.dir = Math.random()<.5?1:-1;
+          }
+          break;
+        }
+      }
+      if(car.p > gr.half+CITY.edge){ car.p = -gr.half; car.snap = true; }
+      else if(car.p < -gr.half-CITY.edge){ car.p = gr.half; car.snap = true; }
+      trafficTarget(barrio, car, _tgt);
+      if(car.snap){ gp.copy(_tgt); car.snap=false; }
+      else { const k = Math.min(1,dt*6); gp.x += (_tgt.x-gp.x)*k; gp.z += (_tgt.z-gp.z)*k; }
+      const hd = trafficHeading(car);
+      car.group.rotation.y += angDiff(car.group.rotation.y, hd)*Math.min(1,dt*5);
+      // running the player over hurts
+      if(car.hitCd>0) car.hitCd -= dt;
+      else if(car.speed>2.5 && G.player.group.position.y<1.6){
+        const dx=pp.x-gp.x, dz=pp.z-gp.z; const al=dx*fx+dz*fz, lat=Math.abs(dx*fz-dz*fx);
+        if(al>-car.len && al<car.len+.6 && lat<1.25){
+          car.hitCd = 1.5; damagePlayer(10+Math.round(car.speed));
+          pp.x += fx*1.6 + (lat>0?0:0); pp.z += fz*1.6; car.speed = 0;
+        }
+      }
+    });
+  });
+}
+
+/* ---------- pedestrians: walk the sidewalks and cross at the zebra crossings ---------- */
+// A pedestrian is always heading for a "corner" node: (i,j) intersection index plus the
+// quadrant (sx,sz) of that intersection. Neighbors are the next corner along the sidewalk
+// or the corner across the street (a zebra crossing) — so nobody ever cuts across a block.
+function cornerPos(barrio, c){ const g=districtGrid(barrio); return { x:barrio.x+g.offs[c.i]+c.sx*CITY.corner, z:barrio.z+g.offs[c.j]+c.sz*CITY.corner }; }
+function cornerNext(barrio, c, prev){
+  const g = districtGrid(barrio), M = g.offs.length-1, opts = [];
+  opts.push({c:{i:c.i,j:c.j,sx:-c.sx,sz:c.sz}, w:.28});
+  opts.push({c:{i:c.i,j:c.j,sx:c.sx,sz:-c.sz}, w:.28});
+  const ni = c.i + c.sx, nj = c.j + c.sz;
+  if(ni>=0 && ni<=M) opts.push({c:{i:ni,j:c.j,sx:-c.sx,sz:c.sz}, w:1});
+  if(nj>=0 && nj<=M) opts.push({c:{i:c.i,j:nj,sx:c.sx,sz:-c.sz}, w:1});
+  const ok = opts.filter(o=>!prev || !(o.c.i===prev.i && o.c.j===prev.j && o.c.sx===prev.sx && o.c.sz===prev.sz));
+  const list = ok.length ? ok : opts;
+  let t = Math.random()*list.reduce((a,o)=>a+o.w,0);
+  for(const o of list){ t -= o.w; if(t<=0) return o.c; }
+  return list[0].c;
+}
+function nearestCorner(barrio, x, z){
+  const g = districtGrid(barrio); let best=null, bd=1e9;
+  for(let i=0;i<g.offs.length;i++) for(let j=0;j<g.offs.length;j++) for(let sx=-1;sx<=1;sx+=2) for(let sz=-1;sz<=1;sz+=2){
+    const d = Math.hypot(x-(barrio.x+g.offs[i]+sx*CITY.corner), z-(barrio.z+g.offs[j]+sz*CITY.corner));
+    if(d<bd){ bd=d; best={i,j,sx,sz}; }
+  }
+  return best;
+}
+function spawnPedestrians(barrio, rand, count){
+  const g = districtGrid(barrio), M = g.offs.length-1;
+  for(let i=0;i<count;i++){
+    const role = rand()<.78 ? 'peaton' : 'quieto';
+    const workerShare = (barrio.layout==='industrial' || barrio.layout==='residencialMedio') ? 0.5 : 0.15;
+    const cr = rand();
+    const civ = cr<workerShare ? 'trabajador' : (cr<workerShare+(1-workerShare)/2 ? 'vecino' : 'vecina');
+    const built = buildCharacterAsset(civ, 1);
+    const group = new THREE.Group(); group.add(built.model);
+    let x, z, node=null, face=0;
+    if(role==='peaton'){
+      node = {i:Math.floor(rand()*(M+1)), j:Math.floor(rand()*(M+1)), sx:rand()<.5?-1:1, sz:rand()<.5?-1:1};
+      const cp = cornerPos(barrio,node); x=cp.x; z=cp.z;
+      registerRig(group, built.limbs);
+    } else {
+      const a = Math.floor(rand()*(M+1)), s = rand()<.5?-1:1, axisZ = rand()<.5;
+      const p = (rand()*2-1)*(g.half-12);
+      let tries=0; while(tries++<6 && g.offs.some(o=>Math.abs(p-o)<CITY.edge+2)) { /* resample */ break; }
+      const lat = g.offs[a] + s*(CITY.corner+.4);
+      x = barrio.x + (axisZ ? lat : p); z = barrio.z + (axisZ ? p : lat);
+      face = axisZ ? Math.atan2(-s,0) : Math.atan2(0,-s);
+      registerRig(group, built.limbs);
+    }
+    group.position.set(x,0,z); group.rotation.y = face;
+    barrio.detailGroup.add(group);
+    const p = {
+      group, role, node, prev:null, target:null, baseSpeed: role==='peaton' ? 0.95+rand()*0.6 : 0,
+      state:'idle', timer:0, fleeDir:null, talkCooldown:0, civ, model:built.model, jit:(rand()-.5)*1.3,
+    };
+    if(node){ p.prev = node; p.node = cornerNext(barrio, node, null); const tp=cornerPos(barrio,p.node); p.target={x:tp.x+p.jit,z:tp.z+p.jit*.6}; }
+    barrio.pedestrians.push(p);
+  }
+}
+function insideAnyAABB(list, x, z){
+  for(let i=0;i<list.length;i++){ const b=list[i]; if(x>b.minX && x<b.maxX && z>b.minZ && z<b.maxZ) return true; }
+  return false;
+}
+function updatePedestrians(dt){
+  G.barrios.forEach(barrio=>{
+    if(!barrio.detailBuilt) return;
+    barrio.pedestrians.forEach(p=>{
+      if(p.talkCooldown>0) p.talkCooldown -= dt;
+      if(p.state!=='fleeing' && p.state!=='shaken'){
+        const threat = isCombatNear(p.group.position.x, p.group.position.z);
+        if(threat){
+          const dx=p.group.position.x-threat.group.position.x, dz=p.group.position.z-threat.group.position.z;
+          const d=Math.hypot(dx,dz)||1;
+          const jitter = (Math.random()-.5)*1.2;
+          const cos=Math.cos(jitter), sin=Math.sin(jitter);
+          p.fleeDir = { x:(dx/d)*cos-(dz/d)*sin, z:(dx/d)*sin+(dz/d)*cos };
+          p.state = 'fleeing';
+          p.timer = 3+Math.random()*3;
+        }
+      }
+      if(p.state==='fleeing'){
+        p.timer -= dt;
+        const nx = p.group.position.x + p.fleeDir.x*5*dt, nz = p.group.position.z + p.fleeDir.z*5*dt;
+        if(insideAnyAABB(barrio.buildingAABBs, nx, nz)) p.timer = 0;
+        else { p.group.position.x = nx; p.group.position.z = nz; p.group.rotation.y = Math.atan2(p.fleeDir.x,p.fleeDir.z); }
+        if(p.timer<=0){ p.state='shaken'; p.timer=2+Math.random()*2; }
+        return;
+      }
+      if(p.state==='shaken'){
+        p.timer -= dt;
+        p.group.rotation.y += Math.sin(p.timer*4)*dt*2;
+        if(p.timer<=0){
+          p.state = p.role==='peaton' ? 'walking' : 'idle';
+          if(p.role==='peaton'){ p.prev = null; p.node = nearestCorner(barrio, p.group.position.x, p.group.position.z); const tp=cornerPos(barrio,p.node); p.target={x:tp.x,z:tp.z}; }
+        }
+        return;
+      }
+      if(p.role!=='peaton'){ p.state='idle'; return; }
+      p.state = 'walking';
+      const dx=p.target.x-p.group.position.x, dz=p.target.z-p.group.position.z;
+      const d=Math.hypot(dx,dz);
+      if(d<.5){
+        const cur = p.node; p.node = cornerNext(barrio, cur, p.prev); p.prev = cur;
+        const tp = cornerPos(barrio,p.node); p.target = {x:tp.x+p.jit, z:tp.z+p.jit*.6};
+      } else {
+        p.group.position.x += dx/d*p.baseSpeed*dt;
+        p.group.position.z += dz/d*p.baseSpeed*dt;
+        const want = Math.atan2(dx,dz);
+        p.group.rotation.y += angDiff(p.group.rotation.y, want)*Math.min(1,dt*8);
+      }
+    });
+  });
+}
+
+/* Builds one district's layout, streets, buildings, traffic and people into barrio.detailGroup. */
 function buildBarrioDetail(barrio){
   if(barrio.detailBuilt) return;
   barrio.detailBuilt = true;
-  const rand = makeSeededRandom(hashString(barrio.id));
+  barrio.traffic = [];
+  const rand = makeSeededRandom(hashString(barrio.id));                 // park + conquerable layout (first build only)
+  const rLots = makeSeededRandom(hashString(barrio.id+'_lots'));         // houses/blocks (stable across rebuilds)
+  const rFurn = makeSeededRandom(hashString(barrio.id+'_furniture'));
+  const rLm = makeSeededRandom(hashString(barrio.id+'_landmarks'));
+  const rLife = makeSeededRandom(hashString(barrio.id+'_life')+Math.floor(Math.random()*1000));
   const identity = DISTRICT_IDENTITY[barrio.layout] || DISTRICT_IDENTITY.plaza;
-  const half = barrio.size/2 - 8; // keep an 8-unit ring clear near the edge for the connecting avenue
-  const plazaR = barrio.size*0.15;
+  const grid = districtGrid(barrio), half = grid.half, N = grid.offs.length;
+  const plazaR = barrioPlazaR(barrio);
 
-  // one park/plaza-adjacent green zone per district, in a random-but-stable quadrant
-  const parkAngle = rand()*Math.PI*2;
-  const parkDist = half*0.6;
-  const parkCX = barrio.x+Math.cos(parkAngle)*parkDist;
-  const parkCZ = barrio.z+Math.sin(parkAngle)*parkDist;
-  const parkR = Math.max(8, half*0.32*identity.parkSize);
-  buildDistrictStreets(barrio, half);
-  addParkZone(barrio, parkCX, parkCZ, parkR, rand, identity);
+  // The park fills one whole block (never one touching the central plaza).
+  let bi=0, bj=0, tries=0;
+  do { bi=Math.floor(rand()*(N-1)); bj=Math.floor(rand()*(N-1)); tries++; }
+  while(tries<40 && Math.hypot((grid.offs[bi]+grid.offs[bi+1])/2,(grid.offs[bj]+grid.offs[bj+1])/2) < plazaR+30);
+  const parkCX = barrio.x+(grid.offs[bi]+grid.offs[bi+1])/2, parkCZ = barrio.z+(grid.offs[bj]+grid.offs[bj+1])/2;
+  const blockW = grid.pitch-2*CITY.edge-2.4;
+  const parkR = Math.max(9, blockW*(identity.parkSize>=1 ? .47 : .36));
 
-  // lamp posts ringing the central plaza, plus a traffic light at each of
-  // the four plaza corners (real intersections, not just decoration)
-  for(let i=0;i<6;i++){
-    const a=(i/6)*Math.PI*2;
-    const lamp = makeLamp();
-    lamp.position.set(barrio.x+Math.cos(a)*(plazaR+2.5), 0, barrio.z+Math.sin(a)*(plazaR+2.5));
-    barrio.detailGroup.add(lamp);
-  }
-  [Math.PI/4, Math.PI*3/4, Math.PI*5/4, Math.PI*7/4].forEach(a=>{
-    const tl = makeTrafficLight();
-    tl.position.set(barrio.x+Math.cos(a)*(plazaR+4), 0, barrio.z+Math.sin(a)*(plazaR+4));
-    tl.rotation.y = a;
-    barrio.detailGroup.add(tl);
-    const cross = makeCrosswalk(plazaR*0.9);
-    cross.position.set(barrio.x+Math.cos(a)*(plazaR+7.5), 0, barrio.z+Math.sin(a)*(plazaR+7.5));
-    cross.rotation.y = a+Math.PI/2;
-    barrio.detailGroup.add(cross);
-  });
-  for(let d=plazaR+12; d<half; d+=18){
-    [[d,6.8],[-d,-6.8],[6.8,d],[-6.8,-d]].forEach(([ox,oz])=>{
-      const lamp = makeLamp();
-      lamp.position.set(barrio.x+ox, 0, barrio.z+oz);
-      barrio.detailGroup.add(lamp);
-      if(rand()<0.3){
-        const bin = makeTrashBin();
-        bin.position.set(barrio.x+ox+1.1, 0, barrio.z+oz+1.1);
-        barrio.detailGroup.add(bin);
-      }
-    });
-  }
+  buildDistrictRoads(barrio);
+  addParkZone(barrio, parkCX, parkCZ, parkR, rLots, identity);
 
-  // --- Buildings ---
-  // Home is player territory already — its buildings are pure decoration
-  // (same simple random boxes as before). Rival districts get real,
-  // conquerable, type-driven buildings with interiors — see
-  // instantiateBuildingMesh()/generateDistrictBuildings() below.
-  if(barrio.home){
-    const targetCount = Math.round(identity.blockCount*(3+Math.floor(rand()*3))*2.3);
-    const placed = [];
-    const GAP = 5;
-    for(let n=0;n<targetCount;n++){
-      let ok=false, x=0,z=0,w=0,d=0,h=0,hw=0,hd=0;
-      for(let tries=0; tries<24 && !ok; tries++){
-        x = barrio.x + (rand()*2-1)*half;
-        z = barrio.z + (rand()*2-1)*half;
-        w = 3+rand()*5; d = 3+rand()*5;
-        h = identity.heightRange[0] + rand()*(identity.heightRange[1]-identity.heightRange[0]);
-        hw = w/2+GAP/2; hd = d/2+GAP/2;
-        if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+Math.max(hw,hd)) continue;
-        if(Math.hypot(x-parkCX,z-parkCZ) < parkR+Math.max(hw,hd)) continue;
-        if(onDistrictStreet(barrio, half, x, z, hw, hd)) continue;
-        ok = true;
-        for(let i=0;i<placed.length && ok;i++){
-          const p = placed[i];
-          if(Math.abs(x-p.x) < hw+p.hw && Math.abs(z-p.z) < hd+p.hd) ok=false;
-        }
-      }
-      if(!ok) continue;
-      placed.push({x,z,hw,hd});
-      const col = identity.wallPalette[Math.floor(rand()*identity.wallPalette.length)];
-      const roofCol = identity.roofPalette[Math.floor(rand()*identity.roofPalette.length)];
-      const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color:col, roughness:.85}));
-      bMesh.position.set(x,h/2,z);
-      bMesh.castShadow=true; bMesh.receiveShadow=true;
-      barrio.detailGroup.add(bMesh);
-      const plinthH = Math.min(1.1, h*0.2);
-      const plinth = new THREE.Mesh(new THREE.BoxGeometry(w+.14,plinthH,d+.14), new THREE.MeshStandardMaterial({color:shadeColor(roofCol,-0.1), roughness:.9}));
-      plinth.position.set(x, plinthH/2, z);
-      barrio.detailGroup.add(plinth);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(w*.7,.6,d*.7), new THREE.MeshStandardMaterial({color:roofCol}));
-      roof.position.set(x,h+.3,z); roof.castShadow=true;
-      barrio.detailGroup.add(roof);
-      barrio.buildingAABBs.push({minX:x-w/2-.4, maxX:x+w/2+.4, minZ:z-d/2-.4, maxZ:z+d/2+.4});
-      barrio.buildingMeshes.push(bMesh);
-    }
-    scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, placed);
-    return;
+  // Home is player territory — all decoration. Rival districts also get real,
+  // conquerable buildings with interiors (see instantiateBuildingMesh()).
+  if(!barrio.home && !barrio.buildings){
+    barrio.buildings = generateDistrictBuildings(barrio, rand, half, plazaR+8, parkCX, parkCZ, parkR);
   }
-
-  // First time this district is ever built: lay out its conquerable
-  // buildings' positions/types/sizes ONCE (persisted on barrio.buildings —
-  // ownership/enemy progress must survive streaming unload/reload, only the
-  // meshes themselves get torn down and recreated).
-  if(!barrio.buildings){
-    barrio.buildings = generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, parkR);
+  const placed = barrio.buildings ? barrio.buildings.map(b=>({x:b.x, z:b.z, hw:b.w/2+1, hd:b.d/2+1})) : [];
+  buildDistrictLots(barrio, rLots, identity, plazaR, {x:parkCX,z:parkCZ,r:parkR}, placed);
+  buildStreetFurniture(barrio, rFurn, identity);
+  buildParkedCars(barrio, rFurn, identity, placed);
+  if(barrio.buildings){
+    barrio.buildings.forEach(b=>instantiateBuildingMesh(b));
+    if(barrio.id==='central') spawnCentralAllies(barrio, plazaR);
   }
-  barrio.buildings.forEach(b=>instantiateBuildingMesh(b));
-  if(barrio.id==='central') spawnCentralAllies(barrio, plazaR);
-  const occupied = barrio.buildings.map(b=>({x:b.x, z:b.z, hw:b.w/2+1, hd:b.d/2+1}));
-  scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, occupied);
-  scatterDistrictLandmarks(barrio, rand, half, plazaR, identity, parkCX, parkCZ, parkR);
-  spawnDistrictStash(barrio, rand, half, plazaR);
+  // living city: people on the sidewalks, traffic on the streets
+  const PED_DENSITY = { plaza:1, residencialAlto:1, industrial:.55, comercial:1.5, residencialMedio:.95, financiero:1.7 };
+  spawnPedestrians(barrio, rLife, Math.round(24*(PED_DENSITY[barrio.layout]||1)));
+  spawnTraffic(barrio, rLife, identity);
+  addSecurityCameras(barrio, rFurn, plazaR);
+  if(barrio.buildings){
+    scatterDistrictLandmarks(barrio, rLm, half, plazaR, identity, parkCX, parkCZ, parkR);
+    spawnDistrictStash(barrio, rLm, half, plazaR);
+  }
 }
 
 /* Central's 5 standing companions (see CENTRAL_ALLIES) — spread around the
@@ -2540,54 +3048,17 @@ function spawnCentralAllies(barrio, plazaR){
   });
 }
 
-/* Scatters the "living city" layer common to every district: parked cars
-   near buildings/streets (rejection-sampled against whatever's already
-   occupied, same trick as building placement, so nothing spawns clipped
-   into a wall) and wandering pedestrian NPCs. Called once per district
-   build — the pedestrians it creates are the only part with a per-frame
-   cost afterward (see updatePedestrians), and only while the district is
-   actually streamed in. */
-function scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, occupied){
-  occupied = occupied || [];
-  const carCount = Math.round((5 + Math.floor(rand()*4))*2.2);
-  for(let n=0;n<carCount;n++){
-    let ok=false, x=0, z=0;
-    for(let tries=0; tries<16 && !ok; tries++){
-      x = barrio.x + (rand()*2-1)*half;
-      z = barrio.z + (rand()*2-1)*half;
-      if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+3) continue;
-      if(Math.hypot(x-parkCX,z-parkCZ) < parkR+3) continue;
-      ok = true;
-      for(let i=0;i<occupied.length && ok;i++){
-        const p = occupied[i];
-        if(Math.abs(x-p.x) < p.hw+1.2 && Math.abs(z-p.z) < p.hd+2.2) ok=false;
-      }
-    }
-    if(!ok) continue;
-    const car = makeParkedCar(identity.carPalette[Math.floor(rand()*identity.carPalette.length)]);
-    car.rotation.y = Math.floor(rand()*4)*(Math.PI/2) + (rand()-.5)*0.15;
-    car.position.set(x,0,z);
-    barrio.detailGroup.add(car);
-  }
-
-  // Foot traffic varies by district character: the financial/commercial
-  // districts feel busy, the industrial district feels comparatively empty.
-  const PED_DENSITY = { plaza:1, residencialAlto:1, industrial:0.4, comercial:1.7, residencialMedio:0.9, financiero:1.8 };
-  const density = PED_DENSITY[barrio.layout] || 1;
-  const pedCount = Math.round((4+rand()*3)*density*1.8);
-  spawnPedestrians(barrio, rand, pedCount, plazaR, parkCX, parkCZ, parkR);
-
-  // Security cameras on the plaza ring — Norte's "zona vigilada" identity
-  // and Central's "seguridad de alta densidad" (more of them, per the brief).
-  if(barrio.layout==='residencialAlto' || barrio.layout==='financiero'){
-    const count = barrio.layout==='financiero' ? 8 : 4;
-    for(let i=0;i<count;i++){
-      const a=(i/count)*Math.PI*2+rand()*0.3, r=plazaR+3.2;
-      const cam = makeSecurityCamera();
-      cam.position.set(barrio.x+Math.cos(a)*r, 3.2, barrio.z+Math.sin(a)*r);
-      cam.rotation.y = a+Math.PI;
-      barrio.detailGroup.add(cam);
-    }
+/* Security cameras on the plaza ring — Norte's "zona vigilada" identity and
+   Central's "seguridad de alta densidad" (more of them, per the brief). */
+function addSecurityCameras(barrio, rand, plazaR){
+  if(barrio.layout!=='residencialAlto' && barrio.layout!=='financiero') return;
+  const count = barrio.layout==='financiero' ? 8 : 4;
+  for(let i=0;i<count;i++){
+    const a=(i/count)*Math.PI*2+rand()*0.3, r=plazaR+3.2;
+    const cam = makeSecurityCamera();
+    cam.position.set(barrio.x+Math.cos(a)*r, 3.2, barrio.z+Math.sin(a)*r);
+    cam.rotation.y = a+Math.PI;
+    barrio.detailGroup.add(cam);
   }
 }
 
@@ -2804,103 +3275,6 @@ function isCombatNear(x,z){
    react the same way to nearby combat: they flee, pause shaken, then resume.
    Tracked per-barrio (not globally) so unbuildBarrioDetail can clear exactly
    this district's pedestrians when its detail streams out. */
-function spawnPedestrians(barrio, rand, count, plazaR, parkCX, parkCZ, parkR){
-  for(let i=0;i<count;i++){
-    const roll = rand();
-    const role = roll<0.6 ? 'peaton' : (roll<0.85 ? 'sentado' : 'quieto');
-    const group = new THREE.Group();
-    // Vecino / Vecina / Trabajador (more workers in the industrial and
-    // rust-belt districts). Pedestrians steer with rotation.y=atan2(dx,dz),
-    // i.e. front = +Z, the model's native facing.
-    const workerShare = (barrio.layout==='industrial' || barrio.layout==='residencialMedio') ? 0.5 : 0.15;
-    const cr = rand();
-    const civ = cr<workerShare ? 'trabajador' : (cr<workerShare+(1-workerShare)/2 ? 'vecino' : 'vecina');
-    const built = buildCharacterAsset(civ, 1, {seated: role==='sentado'});
-    group.add(built.model);
-    if(role!=='sentado') registerRig(group, built.limbs);
-
-    let x, z;
-    if(role==='sentado'){
-      // Biased toward the park (where the benches statistically are — see
-      // addParkZone) instead of tracking literal bench mesh positions.
-      const a=rand()*Math.PI*2, r=rand()*parkR*0.85;
-      x = parkCX+Math.cos(a)*r; z = parkCZ+Math.sin(a)*r;
-    } else {
-      const a = rand()*Math.PI*2, r = plazaR+rand()*20;
-      x = barrio.x+Math.cos(a)*r; z = barrio.z+Math.sin(a)*r;
-    }
-    group.position.set(x,0,z);
-    group.rotation.y = rand()*Math.PI*2;
-    barrio.detailGroup.add(group);
-    barrio.pedestrians.push({
-      group, role, center:{x:barrio.x,z:barrio.z}, radius:plazaR+22,
-      waypoint:{x,z}, baseSpeed: role==='peaton' ? 0.9+rand()*0.7 : 0,
-      state:'idle', timer:0, fleeDir:null,
-      talkCooldown:0, civ, model:built.model,
-    });
-  }
-}
-function updatePedestrians(dt){
-  G.barrios.forEach(barrio=>{
-    if(!barrio.detailBuilt) return;
-    barrio.pedestrians.forEach(p=>{
-      if(p.talkCooldown>0) p.talkCooldown -= dt;
-
-      // Fleeing takes priority over anything else, for every role — even
-      // roles that normally never move (sentado/quieto) will get up and run.
-      if(p.state!=='fleeing' && p.state!=='shaken'){
-        const threat = isCombatNear(p.group.position.x, p.group.position.z);
-        if(threat){
-          const dx=p.group.position.x-threat.group.position.x, dz=p.group.position.z-threat.group.position.z;
-          const d=Math.hypot(dx,dz)||1;
-          const jitter = (Math.random()-.5)*1.2;
-          const cos=Math.cos(jitter), sin=Math.sin(jitter);
-          p.fleeDir = { x:(dx/d)*cos-(dz/d)*sin, z:(dx/d)*sin+(dz/d)*cos };
-          p.state = 'fleeing';
-          // A seated civilian gets up before running: swap to the standing model.
-          if(p.role==='sentado' && !p.stood){
-            p.stood = true;
-            p.group.remove(p.model);
-            const up = buildCharacterAsset(p.civ, 1);
-            p.group.add(up.model); p.model = up.model;
-            registerRig(p.group, up.limbs);
-          }
-          p.timer = 3+Math.random()*3;
-        }
-      }
-
-      if(p.state==='fleeing'){
-        p.timer -= dt;
-        p.group.position.x += p.fleeDir.x*5*dt;
-        p.group.position.z += p.fleeDir.z*5*dt;
-        p.group.rotation.y = Math.atan2(p.fleeDir.x,p.fleeDir.z);
-        if(p.timer<=0){ p.state='shaken'; p.timer=2+Math.random()*2; }
-        return;
-      }
-      if(p.state==='shaken'){
-        p.timer -= dt;
-        // Nervous glance side to side instead of standing frozen.
-        p.group.rotation.y += Math.sin(p.timer*4)*dt*2;
-        if(p.timer<=0){ p.state = p.role==='peaton' ? 'walking' : 'idle'; }
-        return;
-      }
-
-      // Normal behavior: only 'peaton' actually wanders.
-      if(p.role!=='peaton'){ p.state='idle'; return; }
-      p.state = 'walking';
-      const dx=p.waypoint.x-p.group.position.x, dz=p.waypoint.z-p.group.position.z;
-      const d=Math.hypot(dx,dz);
-      if(d<1){
-        const ang=Math.random()*Math.PI*2, rad=Math.random()*p.radius;
-        p.waypoint={x:p.center.x+Math.cos(ang)*rad, z:p.center.z+Math.sin(ang)*rad};
-      } else {
-        p.group.position.x += dx/d*p.baseSpeed*dt;
-        p.group.position.z += dz/d*p.baseSpeed*dt;
-        p.group.rotation.y = Math.atan2(dx,dz);
-      }
-    });
-  });
-}
 /* Nearest talkable civilian within range — mirrors findNearbyRecruit's shape
    so it slots into the same updateInteractionHint/tryInteract priority chain. */
 const TALK_RADIUS = 2.6;
@@ -3545,6 +3919,8 @@ function unbuildBarrioDetail(barrio){
   while(barrio.detailGroup.children.length) barrio.detailGroup.remove(barrio.detailGroup.children[0]);
   barrio.buildingAABBs.length = 0;
   barrio.buildingMeshes.length = 0;
+  barrio.traffic = [];
+  barrio._grid = null;
   barrio.pedestrians.length = 0; // meshes already disposed above (they lived in detailGroup)
   barrio.slowZones.length = 0;   // pool circles etc — meshes already disposed above, rebuilt fresh next stream-in
   barrio.barrels.length = 0;     // fire barrels — same as slowZones, not persisted, rebuilt fresh
@@ -3588,7 +3964,8 @@ function updateWorldStreaming(dt){
   const pp = G.player.group.position;
   let changed = false;
   G.barrios.forEach(b=>{
-    const d = Math.hypot(pp.x-b.x, pp.z-b.z);
+    const ex = Math.max(Math.abs(pp.x-b.x)-b.size/2, 0), ez = Math.max(Math.abs(pp.z-b.z)-b.size/2, 0);
+    const d = Math.hypot(ex, ez); // distance to the district's edge
     if(!b.detailBuilt && d<STREAM_LOAD_RADIUS){ buildBarrioDetail(b); changed=true; }
     else if(b.detailBuilt && d>STREAM_UNLOAD_RADIUS){ unbuildBarrioDetail(b); changed=true; }
   });
@@ -3612,22 +3989,7 @@ function updateDiscovery(){
 
 /* ---------- motorcycle: the one manually-driven vehicle ---------- */
 function createVehicle(x,z){
-  const group = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({color:0xb01c2e, roughness:.4, metalness:.4});
-  const body = new THREE.Mesh(new THREE.BoxGeometry(.5,.5,1.7), bodyMat);
-  body.position.y=.62; body.castShadow=true; group.add(body);
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(.4,.15,.7), new THREE.MeshStandardMaterial({color:0x161616}));
-  seat.position.set(0,.92,-.05); group.add(seat);
-  const wheelMat = new THREE.MeshStandardMaterial({color:0x111111, roughness:.8});
-  const wheelGeo = new THREE.TorusGeometry(.34,.11,8,16);
-  const wheelF = new THREE.Mesh(wheelGeo, wheelMat);
-  wheelF.rotation.y=Math.PI/2; wheelF.position.set(0,.34,.75); group.add(wheelF);
-  const wheelB = new THREE.Mesh(wheelGeo, wheelMat);
-  wheelB.rotation.y=Math.PI/2; wheelB.position.set(0,.34,-.75); group.add(wheelB);
-  const headlight = new THREE.Mesh(new THREE.SphereGeometry(.12,8,8), new THREE.MeshStandardMaterial({color:0xfff2c0, emissive:0xffe58a, emissiveIntensity:.6}));
-  headlight.position.set(0,.68,1.05); group.add(headlight);
-  const handlebar = new THREE.Mesh(new THREE.BoxGeometry(.7,.08,.08), new THREE.MeshStandardMaterial({color:0x222222}));
-  handlebar.position.set(0,1.05,.85); group.add(handlebar);
+  const group = makeMotoModel(0xb01c2e);
   group.position.set(x,0,z);
   G.scene.add(group);
   return { group, mounted:false, speed:20 };
@@ -3647,18 +4009,18 @@ function createMonorail(){
   // Loop roughly tracing the city's outer ring, so it visibly "recorre toda
   // la ciudad" without cutting through the middle of any district's plaza.
   const waypoints = [
-    new THREE.Vector3(230, RAIL_HEIGHT, 230),
-    new THREE.Vector3(230, RAIL_HEIGHT, -230),
-    new THREE.Vector3(120, RAIL_HEIGHT, -600),
-    new THREE.Vector3(-120, RAIL_HEIGHT, -600),
-    new THREE.Vector3(-230, RAIL_HEIGHT, -230),
-    new THREE.Vector3(-230, RAIL_HEIGHT, 230),
+    new THREE.Vector3(540, RAIL_HEIGHT, 540),
+    new THREE.Vector3(540, RAIL_HEIGHT, -540),
+    new THREE.Vector3(300, RAIL_HEIGHT, -1500),
+    new THREE.Vector3(-300, RAIL_HEIGHT, -1500),
+    new THREE.Vector3(-540, RAIL_HEIGHT, -540),
+    new THREE.Vector3(-540, RAIL_HEIGHT, 540),
   ];
   const curve = new THREE.CatmullRomCurve3(waypoints, true, 'catmullrom', 0.5);
 
   const pylonMat = new THREE.MeshStandardMaterial({color:0x2c2c30, roughness:.6, metalness:.3});
   const railMat = new THREE.MeshStandardMaterial({color:0x1c1c20, roughness:.5, metalness:.5});
-  const SEGMENTS = 90;
+  const SEGMENTS = 260;
   const pts = curve.getPoints(SEGMENTS);
   for(let i=0;i<SEGMENTS;i++){
     const p0=pts[i], p1=pts[i+1];
@@ -3669,7 +4031,7 @@ function createMonorail(){
     rail.position.copy(mid);
     rail.rotation.y = Math.atan2(-dx/segLen, -dz/segLen);
     G.scene.add(rail);
-    if(i%6===0){
+    if(i%12===0){
       const pylon = new THREE.Mesh(new THREE.CylinderGeometry(.5,.7,RAIL_HEIGHT,8), pylonMat);
       pylon.position.set(p0.x, RAIL_HEIGHT/2, p0.z);
       pylon.castShadow = true;
@@ -3693,7 +4055,7 @@ function createMonorail(){
   // Two boarding platforms that double as fast-travel points, near home and
   // near the final barrio, so the monorail is a functional transit option
   // and not just scenery.
-  [{x:36, z:14, barrioId:'home'}, {x:20, z:-660, barrioId:'central'}].forEach(spot=>{
+  [{x:14, z:-16, barrioId:'home'}, {x:14, z:-1450-16, barrioId:'central'}].forEach(spot=>{
     const platform = new THREE.Group();
     const deck = new THREE.Mesh(new THREE.BoxGeometry(6,.4,3), new THREE.MeshStandardMaterial({color:0x3a3a40, roughness:.8}));
     deck.position.y = RAIL_HEIGHT-2.2; deck.castShadow=true; platform.add(deck);
@@ -3710,7 +4072,7 @@ function createMonorail(){
     if(barrio) barrio.transitPoints.push({x:spot.x, z:spot.z, label:'Monorriel · '+barrio.name});
   });
 
-  return { curve, cars, speed:0.018 };
+  return { curve, cars, speed:0.0075 };
 }
 
 function updateMonorail(dt){
@@ -3729,7 +4091,7 @@ function updateMonorail(dt){
 function updateInteractionHint(){
   const pl = G.player, veh = G.vehicle, pp = pl.group.position;
   const hint = document.getElementById('hint');
-  const key = isTouchDevice ? 'Tocá 🅴' : 'Presioná E';
+  const key = isTouchDevice ? 'Tocá acá' : 'Presioná E';
   G.nearTransitPoint = null;
   G.nearBuildingDoor = null;
   G.nearRecruit = null;
@@ -4086,6 +4448,7 @@ function setupTouchControls(){
   document.getElementById('interactBtn').addEventListener('pointerdown', e=>{ e.preventDefault(); tryInteract(); });
 
   bindTap(document.getElementById('pauseBtnTouch'), requestPause);
+  bindTap(document.getElementById('hint'), ()=>{ if(isTouchDevice) tryInteract(); });
   bindTap(document.getElementById('shopBtnTouch'), toggleShop);
   bindTap(document.getElementById('reloadBtn'), tryReload);
   bindTap(document.getElementById('mapBtnTouch'), toggleCityMap);
@@ -5245,6 +5608,7 @@ function animate(){
       updateEnemies(dt);
       updateAllies(dt);
       updatePedestrians(dt);
+      updateTraffic(dt);
       updateRigs(dt);
       updateFriends(dt);
       updateCombo(dt);
@@ -5253,6 +5617,8 @@ function animate(){
       updateWorldStreaming(dt);
       updateDiscovery();
       updateInteractionHint();
+      { const h = document.getElementById('hint'); const ib = document.getElementById('interactBtn');
+        if(ib) ib.classList.toggle('ready', h.classList.contains('show') && h.textContent.indexOf('🔒')!==0); }
       updateCameraSmoothing(dt);
       updateFollowCamera();
       updatePopups(dt);
