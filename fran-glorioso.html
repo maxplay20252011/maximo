@@ -533,13 +533,13 @@ const RANKS = [
 // minimap and the city fast-travel map. Districts got ~2.6x bigger (see
 // BARRIO_DEFS below), so this grew to match — everything derives from these
 // two numbers, nothing about map scale is hardcoded elsewhere.
-const MAP_HALF = 850;
+const MAP_HALF = 1300;
 // How far the player must be from a barrio's building/prop content before it
 // gets torn down again, vs. how close before it gets (re)built — see
 // updateWorldStreaming(). The gap between the two avoids rebuilding/tearing
 // down every frame when standing right on the boundary ("hysteresis").
-const STREAM_LOAD_RADIUS = 260;
-const STREAM_UNLOAD_RADIUS = 420;
+const STREAM_LOAD_RADIUS = 390;
+const STREAM_UNLOAD_RADIUS = 600;
 
 // `layout` picks which per-district "identity" buildBarrioDetail() uses
 // (building palette/heights/park style) — see DISTRICT_IDENTITY below.
@@ -547,12 +547,12 @@ const STREAM_UNLOAD_RADIUS = 420;
 // every district gets a metro entrance ("la red de subte conecta toda la
 // ciudad") and a bus stop, home additionally gets the taxi stand hub.
 const BARRIO_DEFS = [
-  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:120, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null,   layout:'plaza',          transit:['metro','bus','taxi']},
-  {id:'norte',   name:'Barrio Norte',    x:0,    z:-320, size:130, color:0x3d8bff, home:false, owned:false, thugs:5, boss:'mini',  layout:'residencialAlto',transit:['metro','bus']},
-  {id:'sur',     name:'Barrio Sur',      x:0,    z:320,  size:130, color:0x3ddc84, home:false, owned:false, thugs:5, boss:'mini',  layout:'industrial',     transit:['metro','bus']},
-  {id:'este',    name:'Barrio Este',     x:320,  z:0,    size:130, color:0xff8c3d, home:false, owned:false, thugs:5, boss:'mini',  layout:'comercial',      transit:['metro','bus']},
-  {id:'oeste',   name:'Barrio Oeste',    x:-320, z:0,    size:130, color:0xd63dff, home:false, owned:false, thugs:5, boss:'mini',  layout:'residencialMedio',transit:['metro','bus']},
-  {id:'central', name:'Barrio Central',  x:0,    z:-700, size:155, color:0xe63946, home:false, owned:false, thugs:6, boss:'final', layout:'financiero',     transit:['metro','bus']}
+  {id:'home',    name:'Barrio Glorioso', x:0,    z:0,    size:190, color:0xffd700, home:true,  owned:true,  thugs:0, boss:null,   layout:'plaza',          transit:['metro','bus','taxi']},
+  {id:'norte',   name:'Barrio Norte',    x:0,    z:-480, size:220, color:0x3d8bff, home:false, owned:false, thugs:8, boss:'mini',  layout:'residencialAlto',transit:['metro','bus']},
+  {id:'sur',     name:'Barrio Sur',      x:0,    z:480,  size:220, color:0x3ddc84, home:false, owned:false, thugs:8, boss:'mini',  layout:'industrial',     transit:['metro','bus']},
+  {id:'este',    name:'Barrio Este',     x:480,  z:0,    size:220, color:0xff8c3d, home:false, owned:false, thugs:8, boss:'mini',  layout:'comercial',      transit:['metro','bus']},
+  {id:'oeste',   name:'Barrio Oeste',    x:-480, z:0,    size:220, color:0xd63dff, home:false, owned:false, thugs:8, boss:'mini',  layout:'residencialMedio',transit:['metro','bus']},
+  {id:'central', name:'Barrio Central',  x:0,    z:-1030, size:260, color:0xe63946, home:false, owned:false, thugs:10, boss:'final', layout:'financiero',     transit:['metro','bus']}
 ];
 
 // 1. "Fran Glorioso comienza con un palo de madera" — palo is the only
@@ -2342,6 +2342,54 @@ function addParkZone(barrio, cx, cz, r, rand, identity){
    solid wall of buildings — this is also where "más espacio entre
    construcciones" comes from. Layout is seeded per-barrio-id so it stays
    identical every time streaming rebuilds it. */
+/* ---------- Internal street grid ----------
+   Every district gets a cross of main streets through its plaza (matching the
+   inter-district avenues) plus a parallel secondary street on each side, so
+   the bigger districts read as city blocks instead of a field of boxes.
+   Buildings keep clear of them (see onDistrictStreet). */
+const DISTRICT_STREET_W = 11;
+function districtStreetOffsets(half){ const o = Math.round(half*0.55); return [0, -o, o]; }
+function onDistrictStreet(barrio, half, x, z, hw, hd){
+  const pad = DISTRICT_STREET_W/2 + 1;
+  const offs = districtStreetOffsets(half);
+  for(let i=0;i<offs.length;i++){
+    if(Math.abs(x-barrio.x-offs[i]) < hw+pad) return true;
+    if(Math.abs(z-barrio.z-offs[i]) < hd+pad) return true;
+  }
+  return false;
+}
+let _streetTexture = null;
+function buildDistrictStreets(barrio, half){
+  if(!_streetTexture){
+    const c = document.createElement('canvas'); c.width=64; c.height=128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle='#2f2d34'; ctx.fillRect(0,0,64,128);
+    for(let i=0;i<260;i++){ ctx.fillStyle='rgba(255,255,255,'+(Math.random()*.05)+')'; ctx.fillRect(Math.random()*64,Math.random()*128,2,2); }
+    ctx.fillStyle='#4b4852'; ctx.fillRect(0,0,6,128); ctx.fillRect(58,0,6,128);
+    ctx.fillStyle='#6a6672'; ctx.fillRect(6,0,1,128); ctx.fillRect(57,0,1,128);
+    ctx.fillStyle='#e8c94a';
+    for(let y=6;y<128;y+=32) ctx.fillRect(30,y,4,16);
+    _streetTexture = new THREE.CanvasTexture(c);
+    _streetTexture.wrapS = _streetTexture.wrapT = THREE.RepeatWrapping;
+    _streetTexture.colorSpace = THREE.SRGBColorSpace;
+    _streetTexture.anisotropy = 4;
+  }
+  const mat = new THREE.MeshStandardMaterial({map:_streetTexture, roughness:.95});
+  const len = half*2 + 16;
+  const offs = districtStreetOffsets(half);
+  offs.forEach(o=>{
+    for(let dir=0; dir<2; dir++){
+      const geo = makeFlatPlaneGeometry(DISTRICT_STREET_W, len);
+      const uv = geo.attributes.uv; for(let i=0;i<uv.count;i++) uv.setY(i, uv.getY(i)*len/16);
+      const m = new THREE.Mesh(geo, mat);
+      m.receiveShadow = true;
+      if(dir===0){ m.position.set(barrio.x+o, 0.026+(o===0?0:0.001), barrio.z); }
+      else { m.rotation.y = Math.PI/2; m.position.set(barrio.x, 0.027+(o===0?0:0.001), barrio.z+o); }
+      barrio.detailGroup.add(m);
+    }
+  });
+}
+
 function buildBarrioDetail(barrio){
   if(barrio.detailBuilt) return;
   barrio.detailBuilt = true;
@@ -2356,6 +2404,7 @@ function buildBarrioDetail(barrio){
   const parkCX = barrio.x+Math.cos(parkAngle)*parkDist;
   const parkCZ = barrio.z+Math.sin(parkAngle)*parkDist;
   const parkR = Math.max(8, half*0.32*identity.parkSize);
+  buildDistrictStreets(barrio, half);
   addParkZone(barrio, parkCX, parkCZ, parkR, rand, identity);
 
   // lamp posts ringing the central plaza, plus a traffic light at each of
@@ -2377,7 +2426,7 @@ function buildBarrioDetail(barrio){
     barrio.detailGroup.add(cross);
   });
   for(let d=plazaR+12; d<half; d+=18){
-    [[d,0],[-d,0],[0,d],[0,-d]].forEach(([ox,oz])=>{
+    [[d,6.8],[-d,-6.8],[6.8,d],[-6.8,-d]].forEach(([ox,oz])=>{
       const lamp = makeLamp();
       lamp.position.set(barrio.x+ox, 0, barrio.z+oz);
       barrio.detailGroup.add(lamp);
@@ -2395,7 +2444,7 @@ function buildBarrioDetail(barrio){
   // conquerable, type-driven buildings with interiors — see
   // instantiateBuildingMesh()/generateDistrictBuildings() below.
   if(barrio.home){
-    const targetCount = identity.blockCount*(3+Math.floor(rand()*3));
+    const targetCount = Math.round(identity.blockCount*(3+Math.floor(rand()*3))*2.3);
     const placed = [];
     const GAP = 5;
     for(let n=0;n<targetCount;n++){
@@ -2408,6 +2457,7 @@ function buildBarrioDetail(barrio){
         hw = w/2+GAP/2; hd = d/2+GAP/2;
         if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+Math.max(hw,hd)) continue;
         if(Math.hypot(x-parkCX,z-parkCZ) < parkR+Math.max(hw,hd)) continue;
+        if(onDistrictStreet(barrio, half, x, z, hw, hd)) continue;
         ok = true;
         for(let i=0;i<placed.length && ok;i++){
           const p = placed[i];
@@ -2499,7 +2549,7 @@ function spawnCentralAllies(barrio, plazaR){
    actually streamed in. */
 function scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, identity, occupied){
   occupied = occupied || [];
-  const carCount = 5 + Math.floor(rand()*4);
+  const carCount = Math.round((5 + Math.floor(rand()*4))*2.2);
   for(let n=0;n<carCount;n++){
     let ok=false, x=0, z=0;
     for(let tries=0; tries<16 && !ok; tries++){
@@ -2524,7 +2574,7 @@ function scatterStreetDecor(barrio, rand, half, plazaR, parkCX, parkCZ, parkR, i
   // districts feel busy, the industrial district feels comparatively empty.
   const PED_DENSITY = { plaza:1, residencialAlto:1, industrial:0.4, comercial:1.7, residencialMedio:0.9, financiero:1.8 };
   const density = PED_DENSITY[barrio.layout] || 1;
-  const pedCount = Math.round((4+rand()*3)*density);
+  const pedCount = Math.round((4+rand()*3)*density*1.8);
   spawnPedestrians(barrio, rand, pedCount, plazaR, parkCX, parkCZ, parkR);
 
   // Security cameras on the plaza ring — Norte's "zona vigilada" identity
@@ -2892,7 +2942,7 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
   // placement model (there's no literal lot grid to skip cells in).
   const identity = DISTRICT_IDENTITY[barrio.layout] || DISTRICT_IDENTITY.plaza;
   const fillFactor = 1-(identity.emptyLotChance||0);
-  const targetCount = Math.round((3+rand()*5)*fillFactor);
+  const targetCount = Math.round((3+rand()*5)*fillFactor*2.4);
   const placed = [];
   const buildings = [];
   const GAP = 6;
@@ -2910,6 +2960,7 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
       hw = w/2+GAP/2; hd = d/2+GAP/2;
       if(Math.hypot(x-barrio.x,z-barrio.z) < plazaR+Math.max(hw,hd)) continue;
       if(Math.hypot(x-parkCX,z-parkCZ) < parkR+Math.max(hw,hd)) continue;
+      if(onDistrictStreet(barrio, half, x, z, hw, hd)) continue;
       ok = true;
       for(let i=0;i<placed.length && ok;i++){
         const p = placed[i];
@@ -2945,7 +2996,7 @@ function generateDistrictBuildings(barrio, rand, half, plazaR, parkCX, parkCZ, p
   // that's the same silent-drop behavior the random pool fill below already
   // had, just applied to the brief's explicit counts first.
   const minimums = DISTRICT_BUILDING_MINIMUMS[barrio.layout] || [];
-  minimums.forEach(m=>{ for(let i=0;i<m.count;i++) placeOne(m.type, null, 80); });
+  minimums.forEach(m=>{ const n = Math.ceil(m.count*1.6); for(let i=0;i<n;i++) placeOne(m.type, null, 120); });
 
   for(let i=0; i<targetCount; i++){
     const typeKey = pool[Math.floor(rand()*pool.length)];
